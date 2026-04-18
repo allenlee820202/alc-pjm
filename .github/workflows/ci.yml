@@ -82,12 +82,15 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Vercel Deploy Hook
-        if: ${{ secrets.VERCEL_DEPLOY_HOOK_URL != '' }}
+      - name: Trigger Vercel Deploy Hook (if configured)
+        env:
+          HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
-          curl -fsSL -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
-      - name: Note when no deploy hook configured
-        if: ${{ secrets.VERCEL_DEPLOY_HOOK_URL == '' }}
-        run: |
-          echo "No VERCEL_DEPLOY_HOOK_URL secret set. Vercel's Git integration"
-          echo "will deploy automatically on push when the project is linked."
+          if [ -n "$HOOK_URL" ]; then
+            echo "Triggering Vercel deploy hook..."
+            curl -fsSL -X POST "$HOOK_URL"
+          else
+            echo "No VERCEL_DEPLOY_HOOK_URL secret set."
+            echo "Vercel's Git integration will deploy automatically on push"
+            echo "when the project is linked to this repo."
+          fi
