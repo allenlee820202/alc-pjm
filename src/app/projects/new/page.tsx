@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getContainer } from "@/infrastructure/container";
+import { DbHeader } from "@/presentation/components/db-header";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,9 @@ export default function NewProjectPage({
 
   return (
     <main className="mx-auto mt-16 max-w-md rounded-lg border bg-white p-8 shadow-sm">
+      <div className="mb-4 flex justify-end">
+        <DbHeader />
+      </div>
       <h1 className="mb-4 text-2xl font-bold">New Project</h1>
       <form action={action} className="space-y-4">
         <div>

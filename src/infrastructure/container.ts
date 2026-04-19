@@ -6,6 +6,11 @@ import type { AuthService } from "@/application/ports/auth-service";
 import { InMemoryProjectRepository } from "@/infrastructure/repositories/in-memory-project-repository";
 import { InMemoryEpicRepository } from "@/infrastructure/repositories/in-memory-epic-repository";
 import { InMemoryTicketRepository } from "@/infrastructure/repositories/in-memory-ticket-repository";
+import { SqliteProjectRepository } from "@/infrastructure/repositories/sqlite-project-repository";
+import { SqliteEpicRepository } from "@/infrastructure/repositories/sqlite-epic-repository";
+import { SqliteTicketRepository } from "@/infrastructure/repositories/sqlite-ticket-repository";
+import { openDatabase, type DatabaseType } from "@/infrastructure/sqlite/database";
+import { resolveDbPath, persistDbPath } from "@/infrastructure/sqlite/db-path";
 import { StubAuthService } from "@/infrastructure/auth/stub-auth-service";
 
 import { CreateProjectUseCase } from "@/application/use-cases/create-project";
@@ -36,6 +41,12 @@ interface Container {
   transitionTicket: TransitionTicketUseCase;
   archiveTicket: ArchiveTicketUseCase;
   unarchiveTicket: UnarchiveTicketUseCase;
+  /** Mode currently in use ("memory" | "sqlite" | "supabase"). */
+  repoMode: string;
+  /** Absolute path of the SQLite file when repoMode === "sqlite", else null. */
+  dbPath: string | null;
+  /** Underlying SQLite handle, kept here so we can close it on swap. */
+  _db: DatabaseType | null;
 }
 
 declare global {
@@ -44,29 +55,37 @@ declare global {
 }
 
 function buildContainer(): Container {
-  const repoMode = process.env.REPO_MODE ?? "memory";
+  // Default to sqlite for local development; tests/scripts override with
+  // REPO_MODE=memory. Supabase is reserved for the future cloud adapter.
+  const repoMode = process.env.REPO_MODE ?? "sqlite";
   const authMode = process.env.AUTH_MODE ?? "stub";
 
-  // For now only the in-memory repository is wired; a Supabase adapter can be
-  // dropped in here once the cloud project is provisioned.
-  if (repoMode !== "memory") {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `REPO_MODE=${repoMode} requested but only "memory" is wired. Falling back to in-memory.`,
-    );
+  let projects: ProjectRepository;
+  let epics: EpicRepository;
+  let tickets: TicketRepository;
+  let db: DatabaseType | null = null;
+  let dbPath: string | null = null;
+
+  if (repoMode === "sqlite") {
+    dbPath = resolveDbPath();
+    db = openDatabase(dbPath);
+    projects = new SqliteProjectRepository(db);
+    epics = new SqliteEpicRepository(db);
+    tickets = new SqliteTicketRepository(db);
+  } else {
+    if (repoMode !== "memory") {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `REPO_MODE=${repoMode} requested but only "sqlite" and "memory" are wired. Falling back to memory.`,
+      );
+    }
+    projects = new InMemoryProjectRepository();
+    epics = new InMemoryEpicRepository();
+    tickets = new InMemoryTicketRepository();
   }
 
-  const projects = new InMemoryProjectRepository();
-  const epics = new InMemoryEpicRepository();
-  const tickets = new InMemoryTicketRepository();
-
-  // Auth wiring. The supabase adapter is loaded lazily via dynamic import so
-  // it never gets bundled when AUTH_MODE=stub.
   let auth: AuthService = new StubAuthService();
   if (authMode === "supabase") {
-    // Loaded synchronously by side-effect after first request; until then the
-    // stub auth fronts the request lifecycle. In practice in production we set
-    // the env at boot and import eagerly.
     import("@/infrastructure/auth/supabase-auth-service").then((mod) => {
       auth = new mod.SupabaseAuthService();
       if (globalThis.__ALC_PJM_CONTAINER__) {
@@ -98,6 +117,9 @@ function buildContainer(): Container {
     transitionTicket: new TransitionTicketUseCase(tickets),
     archiveTicket: new ArchiveTicketUseCase(tickets),
     unarchiveTicket: new UnarchiveTicketUseCase(tickets),
+    repoMode,
+    dbPath,
+    _db: db,
   };
 }
 
@@ -111,4 +133,24 @@ export function getContainer(): Container {
     globalThis.__ALC_PJM_CONTAINER__ = buildContainer();
   }
   return globalThis.__ALC_PJM_CONTAINER__;
+}
+
+/**
+ * Switch the active SQLite database file at runtime. Persists the choice so
+ * the next process start uses the same file. No-op (and throws) when not in
+ * sqlite mode.
+ */
+export function switchSqliteDatabase(newPath: string): { dbPath: string } {
+  const current = getContainer();
+  if (current.repoMode !== "sqlite") {
+    throw new Error(
+      `Cannot switch database file when REPO_MODE="${current.repoMode}". Only "sqlite" is supported.`,
+    );
+  }
+  const abs = persistDbPath(newPath);
+  current._db?.close();
+  // Drop the cached container so the next getContainer() call rebuilds with
+  // the new file. The seed runs again only if the new file is empty.
+  globalThis.__ALC_PJM_CONTAINER__ = undefined;
+  return { dbPath: abs };
 }

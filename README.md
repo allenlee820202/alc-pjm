@@ -22,7 +22,7 @@ A lightweight, Jira-like project management board built with **Next.js 15**, **T
 | UI / SSR         | Next.js 15 (App Router) + React + Tailwind             |
 | Language         | TypeScript                                             |
 | Auth             | Supabase Auth (email/password) — stubbed locally       |
-| Persistence      | In-memory (default). Pluggable port for Supabase/Postgres |
+| Persistence      | **SQLite** (local, default) via `better-sqlite3`. Pluggable port for future Supabase/Postgres |
 | Validation       | zod                                                    |
 | Unit testing     | Vitest + Testing Library                               |
 | Integration / E2E| Playwright                                             |
@@ -64,6 +64,35 @@ demo@example.com / demo1234
 
 These are configurable via `STUB_AUTH_EMAIL` / `STUB_AUTH_PASSWORD` env vars. See `.env.example`.
 
+## Local data storage (SQLite)
+
+By default, `pnpm dev` and `pnpm start` persist projects, epics, and tickets to a
+local SQLite file at `./data/alc-pjm.db`. The file (and parent dir) are created
+automatically on first run and ignored by git.
+
+Pick which file to use, in order of priority:
+
+1. **Runtime switch from the UI** — every authenticated page shows a `SQLITE`
+   badge with the current file path and a **Switch DB** button. Pasting another
+   path opens/creates that file and persists the choice across restarts (stored
+   in `.alc-pjm/config.json`). Same thing exposed via:
+   ```bash
+   curl -X POST http://localhost:3000/api/db \
+     -H 'content-type: application/json' \
+     --cookie cookies.txt \
+     -d '{"path":"/Users/me/notes/work.db"}'
+   ```
+   `GET /api/db` returns the current mode + path.
+2. **`DB_PATH` env var** — overrides the default but is itself overridden by a
+   persisted runtime switch. Useful for one-off scripts:
+   ```bash
+   DB_PATH=./scratch/demo.db pnpm dev
+   ```
+3. **Default** — `./data/alc-pjm.db`.
+
+To run completely without a database (e.g. CI, ephemeral demos), set
+`REPO_MODE=memory`.
+
 ## Tests
 
 ```bash
@@ -92,6 +121,8 @@ All endpoints require an authenticated session cookie. JSON body / query params 
 | POST   | `/api/tickets`                                | `{ projectId, epicId?, parentTicketId?, type, title, description?, priority }` |
 | POST   | `/api/auth/login`                             | `{ email, password }` |
 | POST   | `/api/auth/logout`                            | —            |
+| GET    | `/api/db`                                     | —            |
+| POST   | `/api/db`                                     | `{ path }` (sqlite mode only) |
 
 ## Deployment
 

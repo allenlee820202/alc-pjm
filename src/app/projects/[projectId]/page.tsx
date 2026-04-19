@@ -5,6 +5,7 @@ import { Id } from "@/domain/shared/id";
 import { ProjectSwitcher } from "@/presentation/components/project-switcher";
 import { StatusSelect } from "@/presentation/components/status-select";
 import { ArchiveButton } from "@/presentation/components/archive-button";
+import { DbHeader } from "@/presentation/components/db-header";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,9 @@ export default async function ProjectPage({
           <button className="text-sm text-slate-600 hover:text-slate-900">Sign out</button>
         </form>
       </header>
+      <div className="mb-4 flex justify-end">
+        <DbHeader />
+      </div>
 
       <section className="mb-8 grid gap-6 md:grid-cols-2">
         <div className="rounded-lg border bg-white p-4 shadow-sm">

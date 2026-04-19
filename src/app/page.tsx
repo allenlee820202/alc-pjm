@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getContainer } from "@/infrastructure/container";
+import { DbHeader } from "@/presentation/components/db-header";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,9 @@ export default async function HomePage() {
 
   return (
     <main className="mx-auto max-w-2xl p-8">
+      <div className="mb-4 flex justify-end">
+        <DbHeader />
+      </div>
       <h1 className="mb-4 text-2xl font-bold">No projects yet</h1>
       <Link
         href="/projects/new"

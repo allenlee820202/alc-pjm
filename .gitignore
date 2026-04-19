@@ -16,3 +16,11 @@ test-results/
 .turbo/
 next-env.d.ts.bak
 tsconfig.tsbuildinfo
+
+# Local SQLite store + persisted runtime config
+data/
+.alc-pjm/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

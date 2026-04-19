@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getContainer } from "@/infrastructure/container";
 import { Id } from "@/domain/shared/id";
+import { DbHeader } from "@/presentation/components/db-header";
 
 export const dynamic = "force-dynamic";
 
@@ -37,13 +38,14 @@ export default async function EditTicketPage({
 
   return (
     <main className="mx-auto max-w-2xl p-6">
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <Link
           href={`/projects/${projectId}`}
           className="text-sm text-slate-600 hover:underline"
         >
           ← Back to board
         </Link>
+        <DbHeader />
       </div>
       <h1 className="mb-4 text-2xl font-bold">Edit ticket</h1>
       <form action={save} className="space-y-4 rounded-lg border bg-white p-4 shadow-sm">
