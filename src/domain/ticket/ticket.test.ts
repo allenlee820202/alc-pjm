@@ -160,4 +160,76 @@ describe("Ticket aggregate", () => {
     expect(t.title).toBe("New");
     expect(t.updatedAt.getTime()).toBeGreaterThan(before);
   });
+
+  describe("editDescription", () => {
+    it("updates and trims description", () => {
+      const t = Ticket.create({
+        projectId,
+        type: TicketType.of("task"),
+        title: "T",
+        priority: Priority.of("p2"),
+      });
+      t.editDescription("  new details  ");
+      expect(t.description).toBe("new details");
+    });
+  });
+
+  describe("archive (soft delete)", () => {
+    function make(): Ticket {
+      return Ticket.create({
+        projectId,
+        type: TicketType.of("task"),
+        title: "T",
+        priority: Priority.of("p2"),
+      });
+    }
+
+    it("marks the ticket archived with a timestamp", () => {
+      const t = make();
+      expect(t.archived).toBe(false);
+      expect(t.archivedAt).toBeNull();
+      t.archive();
+      expect(t.archived).toBe(true);
+      expect(t.archivedAt).toBeInstanceOf(Date);
+    });
+
+    it("is idempotent and preserves the original archive timestamp", async () => {
+      const t = make();
+      t.archive();
+      const first = t.archivedAt!.getTime();
+      await new Promise((r) => setTimeout(r, 2));
+      t.archive();
+      expect(t.archivedAt!.getTime()).toBe(first);
+    });
+
+    it("rejects mutations while archived", () => {
+      const t = make();
+      t.archive();
+      expect(() => t.rename("x")).toThrow(/archived/);
+      expect(() => t.editDescription("x")).toThrow(/archived/);
+      expect(() => t.setPriority(Priority.of("p0"))).toThrow(/archived/);
+      expect(() => t.transitionTo(TicketStatus.of("in_progress"))).toThrow(/archived/);
+      expect(() => t.assignToEpic(epicId)).toThrow(/archived/);
+    });
+
+    it("unarchive restores mutability", () => {
+      const t = make();
+      t.archive();
+      t.unarchive();
+      expect(t.archived).toBe(false);
+      t.rename("ok");
+      expect(t.title).toBe("ok");
+    });
+
+    it("snapshot round-trips archived state", () => {
+      const t = make();
+      t.archive();
+      const snap = t.toSnapshot();
+      expect(snap.archived).toBe(true);
+      expect(snap.archivedAt).not.toBeNull();
+      const restored = Ticket.fromSnapshot(snap);
+      expect(restored.archived).toBe(true);
+      expect(restored.toSnapshot()).toEqual(snap);
+    });
+  });
 });

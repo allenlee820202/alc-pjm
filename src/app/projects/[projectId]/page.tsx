@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getContainer } from "@/infrastructure/container";
 import { Id } from "@/domain/shared/id";
+import { ProjectSwitcher } from "@/presentation/components/project-switcher";
+import { StatusSelect } from "@/presentation/components/status-select";
+import { ArchiveButton } from "@/presentation/components/archive-button";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,12 @@ const TYPE_BADGE: Record<string, string> = {
   subtask: "bg-slate-100 text-slate-800",
   bug: "bg-red-100 text-red-800",
 };
+
+const COLUMNS: Array<{ key: "todo" | "in_progress" | "done"; label: string }> = [
+  { key: "todo", label: "To do" },
+  { key: "in_progress", label: "In progress" },
+  { key: "done", label: "Done" },
+];
 
 export default async function ProjectPage({
   params,
@@ -74,6 +83,15 @@ export default async function ProjectPage({
     redirect("/login");
   }
 
+  const ticketsByStatus = {
+    todo: [] as typeof allTickets,
+    in_progress: [] as typeof allTickets,
+    done: [] as typeof allTickets,
+  };
+  for (const t of allTickets) {
+    ticketsByStatus[t.status.value].push(t);
+  }
+
   return (
     <main className="mx-auto max-w-6xl p-6">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -82,18 +100,10 @@ export default async function ProjectPage({
             <span className="text-slate-500">{project.key}</span> · {project.name}
           </h1>
           {allProjects.length > 1 && (
-            <select
-              defaultValue={projectId}
-              className="rounded border border-slate-300 px-2 py-1 text-sm"
-              // biome-ignore lint/a11y: simple navigation
-              onChange={undefined as never}
-            >
-              {allProjects.map((p) => (
-                <option key={p.id.value} value={p.id.value}>
-                  {p.key}
-                </option>
-              ))}
-            </select>
+            <ProjectSwitcher
+              current={projectId}
+              projects={allProjects.map((p) => ({ id: p.id.value, key: p.key }))}
+            />
           )}
         </div>
         <form action={logout}>
@@ -215,46 +225,72 @@ export default async function ProjectPage({
           </ul>
         )}
 
-        <h2 className="mb-3 text-lg font-semibold">Tickets ({allTickets.length})</h2>
+        <h2 className="mb-3 text-lg font-semibold">Board ({allTickets.length})</h2>
         {allTickets.length === 0 ? (
           <p className="text-sm text-slate-500">No tickets yet. Create one above.</p>
         ) : (
-          <ul className="space-y-2">
-            {allTickets.map((t) => {
-              const s = t.toSnapshot();
-              const epic = epics.find((e) => e.id.value === s.epicId);
-              return (
-                <li
-                  key={s.id}
-                  data-testid="ticket-row"
-                  className="flex flex-wrap items-center gap-3 rounded border bg-white p-3 shadow-sm"
-                >
-                  <span
-                    className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${PRIORITY_BADGE[s.priority]}`}
-                  >
-                    {s.priority}
+          <div className="grid gap-4 md:grid-cols-3" data-testid="kanban">
+            {COLUMNS.map((col) => (
+              <div
+                key={col.key}
+                data-testid={`column-${col.key}`}
+                className="rounded-lg border bg-slate-50 p-3"
+              >
+                <div className="mb-2 flex items-center justify-between text-sm font-semibold uppercase tracking-wide text-slate-600">
+                  <span>{col.label}</span>
+                  <span className="rounded bg-slate-200 px-2 py-0.5 text-xs">
+                    {ticketsByStatus[col.key].length}
                   </span>
-                  <span
-                    className={`rounded px-2 py-0.5 text-xs ${TYPE_BADGE[s.type]}`}
-                  >
-                    {s.type}
-                  </span>
-                  <span className="flex-1 font-medium">{s.title}</span>
-                  {epic && (
-                    <Link
-                      href={`/projects/${projectId}?epic=${epic.id.value}`}
-                      className="rounded bg-purple-50 px-2 py-0.5 text-xs text-purple-700"
-                    >
-                      {epic.name}
-                    </Link>
-                  )}
-                  <span className="text-xs uppercase tracking-wide text-slate-500">
-                    {s.status.replace("_", " ")}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+                </div>
+                <ul className="space-y-2">
+                  {ticketsByStatus[col.key].map((t) => {
+                    const s = t.toSnapshot();
+                    const epic = epics.find((e) => e.id.value === s.epicId);
+                    return (
+                      <li
+                        key={s.id}
+                        data-testid="ticket-row"
+                        data-ticket-id={s.id}
+                        className="rounded border bg-white p-3 shadow-sm"
+                      >
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded border px-2 py-0.5 text-xs font-bold uppercase ${PRIORITY_BADGE[s.priority]}`}
+                          >
+                            {s.priority}
+                          </span>
+                          <span
+                            className={`rounded px-2 py-0.5 text-xs ${TYPE_BADGE[s.type]}`}
+                          >
+                            {s.type}
+                          </span>
+                          {epic && (
+                            <span className="rounded bg-purple-50 px-2 py-0.5 text-xs text-purple-700">
+                              {epic.name}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mb-2 font-medium">{s.title}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs">
+                            <Link
+                              href={`/projects/${projectId}/tickets/${s.id}/edit`}
+                              data-testid={`edit-${s.id}`}
+                              className="text-blue-600 hover:underline"
+                            >
+                              Edit
+                            </Link>
+                            <ArchiveButton ticketId={s.id} />
+                          </div>
+                          <StatusSelect ticketId={s.id} current={s.status} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
         )}
       </section>
     </main>

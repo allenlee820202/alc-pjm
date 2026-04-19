@@ -14,6 +14,12 @@ import { CreateTicketUseCase } from "@/application/use-cases/create-ticket";
 import { ListProjectsUseCase } from "@/application/use-cases/list-projects";
 import { ListEpicsUseCase } from "@/application/use-cases/list-epics";
 import { ListTicketsUseCase } from "@/application/use-cases/list-tickets";
+import { UpdateTicketUseCase } from "@/application/use-cases/update-ticket";
+import { TransitionTicketUseCase } from "@/application/use-cases/transition-ticket";
+import {
+  ArchiveTicketUseCase,
+  UnarchiveTicketUseCase,
+} from "@/application/use-cases/archive-ticket";
 
 interface Container {
   projects: ProjectRepository;
@@ -26,6 +32,10 @@ interface Container {
   listProjects: ListProjectsUseCase;
   listEpics: ListEpicsUseCase;
   listTickets: ListTicketsUseCase;
+  updateTicket: UpdateTicketUseCase;
+  transitionTicket: TransitionTicketUseCase;
+  archiveTicket: ArchiveTicketUseCase;
+  unarchiveTicket: UnarchiveTicketUseCase;
 }
 
 declare global {
@@ -84,6 +94,10 @@ function buildContainer(): Container {
     listProjects: new ListProjectsUseCase(projects),
     listEpics: new ListEpicsUseCase(epics),
     listTickets: new ListTicketsUseCase(tickets),
+    updateTicket: new UpdateTicketUseCase(tickets, epics),
+    transitionTicket: new TransitionTicketUseCase(tickets),
+    archiveTicket: new ArchiveTicketUseCase(tickets),
+    unarchiveTicket: new UnarchiveTicketUseCase(tickets),
   };
 }
 

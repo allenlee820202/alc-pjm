@@ -3,6 +3,9 @@ import { CreateProjectUseCase } from "./create-project";
 import { CreateEpicUseCase } from "./create-epic";
 import { CreateTicketUseCase } from "./create-ticket";
 import { ListTicketsUseCase } from "./list-tickets";
+import { UpdateTicketUseCase } from "./update-ticket";
+import { TransitionTicketUseCase } from "./transition-ticket";
+import { ArchiveTicketUseCase, UnarchiveTicketUseCase } from "./archive-ticket";
 import { InMemoryProjectRepository } from "@/infrastructure/repositories/in-memory-project-repository";
 import { InMemoryEpicRepository } from "@/infrastructure/repositories/in-memory-epic-repository";
 import { InMemoryTicketRepository } from "@/infrastructure/repositories/in-memory-ticket-repository";
@@ -17,6 +20,10 @@ describe("Use cases", () => {
   let createEpic: CreateEpicUseCase;
   let createTicket: CreateTicketUseCase;
   let listTickets: ListTicketsUseCase;
+  let updateTicket: UpdateTicketUseCase;
+  let transitionTicket: TransitionTicketUseCase;
+  let archiveTicket: ArchiveTicketUseCase;
+  let unarchiveTicket: UnarchiveTicketUseCase;
 
   beforeEach(() => {
     projects = new InMemoryProjectRepository();
@@ -26,6 +33,10 @@ describe("Use cases", () => {
     createEpic = new CreateEpicUseCase(projects, epics);
     createTicket = new CreateTicketUseCase(projects, epics, tickets);
     listTickets = new ListTicketsUseCase(tickets);
+    updateTicket = new UpdateTicketUseCase(tickets, epics);
+    transitionTicket = new TransitionTicketUseCase(tickets);
+    archiveTicket = new ArchiveTicketUseCase(tickets);
+    unarchiveTicket = new UnarchiveTicketUseCase(tickets);
   });
 
   describe("CreateProjectUseCase", () => {
@@ -208,6 +219,141 @@ describe("Use cases", () => {
         status: "in_progress",
       });
       expect(result).toHaveLength(0);
+    });
+  });
+
+  describe("UpdateTicketUseCase", () => {
+    it("updates title, description, priority", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "old",
+        priority: "p2",
+      });
+      const updated = await updateTicket.execute({
+        ticketId: t.id.value,
+        title: "new",
+        description: "details",
+        priority: "p0",
+      });
+      expect(updated.title).toBe("new");
+      expect(updated.description).toBe("details");
+      expect(updated.priority.value).toBe("p0");
+    });
+
+    it("clears the epic when epicId is null", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const e = await createEpic.execute({ projectId: p.id.value, name: "E" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        epicId: e.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+      const updated = await updateTicket.execute({ ticketId: t.id.value, epicId: null });
+      expect(updated.epicId).toBeNull();
+    });
+
+    it("rejects an epic from a different project", async () => {
+      const p1 = await createProject.execute({ key: "AA", name: "A" });
+      const p2 = await createProject.execute({ key: "BB", name: "B" });
+      const otherEpic = await createEpic.execute({ projectId: p2.id.value, name: "E2" });
+      const t = await createTicket.execute({
+        projectId: p1.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+      await expect(
+        updateTicket.execute({ ticketId: t.id.value, epicId: otherEpic.id.value }),
+      ).rejects.toThrow(/does not belong/);
+    });
+
+    it("404s on missing ticket", async () => {
+      await expect(
+        updateTicket.execute({ ticketId: Id.generate().value, title: "x" }),
+      ).rejects.toThrow(NotFoundError);
+    });
+  });
+
+  describe("TransitionTicketUseCase", () => {
+    it("moves a ticket through the workflow", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+      const inProg = await transitionTicket.execute({
+        ticketId: t.id.value,
+        status: "in_progress",
+      });
+      expect(inProg.status.value).toBe("in_progress");
+      const done = await transitionTicket.execute({
+        ticketId: t.id.value,
+        status: "done",
+      });
+      expect(done.status.value).toBe("done");
+    });
+
+    it("rejects illegal transitions", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+      await expect(
+        transitionTicket.execute({ ticketId: t.id.value, status: "done" }),
+      ).rejects.toThrow(ValidationError);
+    });
+  });
+
+  describe("Archive / Unarchive", () => {
+    it("archived tickets are excluded from list by default and re-included with includeArchived", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t1 = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "keep",
+        priority: "p2",
+      });
+      const t2 = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "archive me",
+        priority: "p2",
+      });
+      await archiveTicket.execute({ ticketId: t2.id.value });
+
+      const visible = await listTickets.execute({ projectId: p.id.value });
+      expect(visible.map((t) => t.id.value)).toEqual([t1.id.value]);
+
+      const all = await listTickets.execute({
+        projectId: p.id.value,
+        includeArchived: true,
+      });
+      expect(all.map((t) => t.id.value).sort()).toEqual(
+        [t1.id.value, t2.id.value].sort(),
+      );
+    });
+
+    it("unarchive restores visibility", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+      await archiveTicket.execute({ ticketId: t.id.value });
+      await unarchiveTicket.execute({ ticketId: t.id.value });
+      const visible = await listTickets.execute({ projectId: p.id.value });
+      expect(visible).toHaveLength(1);
     });
   });
 });

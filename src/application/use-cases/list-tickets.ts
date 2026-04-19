@@ -11,6 +11,7 @@ export interface ListTicketsInput {
   status?: TicketStatusValue;
   priority?: PriorityValue;
   type?: TicketTypeValue;
+  includeArchived?: boolean;
 }
 
 export class ListTicketsUseCase {
@@ -23,6 +24,7 @@ export class ListTicketsUseCase {
     if (input.status) filters.status = input.status;
     if (input.priority) filters.priority = input.priority;
     if (input.type) filters.type = input.type;
+    if (input.includeArchived !== undefined) filters.includeArchived = input.includeArchived;
 
     const all = await this.tickets.list(filters);
     // Sort: priority weight asc (p0 first), then createdAt desc.

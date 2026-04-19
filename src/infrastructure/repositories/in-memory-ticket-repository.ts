@@ -16,7 +16,9 @@ export class InMemoryTicketRepository implements TicketRepository {
   }
 
   async list(filters: TicketListFilters = {}): Promise<Ticket[]> {
+    const includeArchived = filters.includeArchived ?? false;
     return [...this.store.values()].filter((t) => {
+      if (!includeArchived && t.archived) return false;
       if (filters.projectId && !t.projectId.equals(filters.projectId)) return false;
       if (filters.epicId) {
         if (!t.epicId || !t.epicId.equals(filters.epicId)) return false;

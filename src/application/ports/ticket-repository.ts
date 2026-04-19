@@ -9,6 +9,8 @@ export interface TicketListFilters {
   status?: TicketStatusValue;
   priority?: PriorityValue;
   type?: TicketTypeValue;
+  /** When true, archived tickets are included in results. Default: false. */
+  includeArchived?: boolean;
 }
 
 export interface TicketRepository {

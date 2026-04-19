@@ -20,6 +20,8 @@ export interface TicketSnapshot {
   description: string;
   priority: PriorityValue;
   status: TicketStatusValue;
+  archived: boolean;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,6 +58,7 @@ export class Ticket {
     private _description: string,
     private _priority: Priority,
     private _status: TicketStatus,
+    private _archivedAt: Date | null,
     public readonly createdAt: Date,
     private _updatedAt: Date,
   ) {}
@@ -103,6 +106,7 @@ export class Ticket {
       props.description?.trim() ?? "",
       props.priority,
       props.status ?? TicketStatus.initial(),
+      null,
       props.createdAt ?? now,
       props.updatedAt ?? now,
     );
@@ -126,8 +130,21 @@ export class Ticket {
   get updatedAt(): Date {
     return this._updatedAt;
   }
+  get archived(): boolean {
+    return this._archivedAt !== null;
+  }
+  get archivedAt(): Date | null {
+    return this._archivedAt;
+  }
+
+  private ensureNotArchived(action: string): void {
+    if (this.archived) {
+      throw new ValidationError(`Cannot ${action} an archived ticket`);
+    }
+  }
 
   rename(title: string): void {
+    this.ensureNotArchived("rename");
     const trimmed = title?.trim() ?? "";
     if (trimmed.length === 0) throw new ValidationError("Title must not be empty");
     if (trimmed.length > TITLE_MAX)
@@ -136,12 +153,20 @@ export class Ticket {
     this.touch();
   }
 
+  editDescription(description: string): void {
+    this.ensureNotArchived("edit");
+    this._description = description?.trim() ?? "";
+    this.touch();
+  }
+
   setPriority(priority: Priority): void {
+    this.ensureNotArchived("change priority of");
     this._priority = priority;
     this.touch();
   }
 
   transitionTo(next: TicketStatus): void {
+    this.ensureNotArchived("transition");
     if (!this._status.canTransitionTo(next)) {
       throw new ValidationError(
         `Cannot transition from ${this._status.value} to ${next.value}`,
@@ -152,7 +177,20 @@ export class Ticket {
   }
 
   assignToEpic(epicId: EpicId | null): void {
+    this.ensureNotArchived("change epic of");
     this._epicId = epicId;
+    this.touch();
+  }
+
+  archive(): void {
+    if (this.archived) return;
+    this._archivedAt = new Date();
+    this.touch();
+  }
+
+  unarchive(): void {
+    if (!this.archived) return;
+    this._archivedAt = null;
     this.touch();
   }
 
@@ -167,6 +205,8 @@ export class Ticket {
       description: this._description,
       priority: this._priority.value,
       status: this._status.value,
+      archived: this.archived,
+      archivedAt: this._archivedAt?.toISOString() ?? null,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this._updatedAt.toISOString(),
     };
@@ -183,6 +223,7 @@ export class Ticket {
       s.description,
       Priority.of(s.priority),
       TicketStatus.of(s.status),
+      s.archivedAt ? new Date(s.archivedAt) : null,
       new Date(s.createdAt),
       new Date(s.updatedAt),
     );
