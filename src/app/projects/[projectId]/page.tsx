@@ -105,6 +105,13 @@ export default async function ProjectPage({
               projects={allProjects.map((p) => ({ id: p.id.value, key: p.key }))}
             />
           )}
+          <Link
+            href="/projects/new"
+            data-testid="new-project"
+            className="rounded border border-blue-600 px-3 py-1 text-sm text-blue-700 hover:bg-blue-50"
+          >
+            + New project
+          </Link>
         </div>
         <form action={logout}>
           <button className="text-sm text-slate-600 hover:text-slate-900">Sign out</button>

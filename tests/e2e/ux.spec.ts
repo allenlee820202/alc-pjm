@@ -116,6 +116,20 @@ test.describe("Archive (soft delete) ticket", () => {
   });
 });
 
+test.describe("New project button", () => {
+  test("header link navigates to /projects/new from a project page", async ({ page }) => {
+    await login(page);
+    // Land on the seeded DEMO project (or any existing one).
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/projects\//);
+    await Promise.all([
+      page.waitForURL(/\/projects\/new$/),
+      page.getByTestId("new-project").click(),
+    ]);
+    await expect(page.getByTestId("project-key")).toBeVisible();
+  });
+});
+
 test.describe("Project switcher", () => {
   test("navigates to the chosen project", async ({ page }) => {
     await login(page);
