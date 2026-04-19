@@ -3,9 +3,23 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light dark;
+  /* Force light scheme so the OS doesn't repaint native form controls
+     (white-on-white text on dark-mode systems). */
+  color-scheme: light;
 }
 
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+@layer base {
+  /* Ensure all native form controls have explicit colors regardless of OS theme. */
+  input,
+  select,
+  textarea {
+    @apply bg-white text-slate-900 placeholder:text-slate-400;
+  }
+  option {
+    @apply bg-white text-slate-900;
+  }
 }
