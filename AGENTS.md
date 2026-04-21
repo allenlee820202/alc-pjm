@@ -53,6 +53,49 @@ Default `AUTH_MODE=stub` uses HMAC cookie sessions. Demo credentials: `demo@exam
 
 `@/*` maps to `./src/*` — configured in both `tsconfig.json` and `vitest.config.ts`.
 
+## CLI tools (`bin/`)
+
+Two CLI tools live in `bin/`. They run via `tsx` (devDependency) and are **excluded** from the main `tsconfig.json` and ESLint. They must NOT use `@/*` path aliases — only relative imports within `bin/`.
+
+### `pjm-server` — server launcher
+
+```bash
+pnpm pjm-server init [--defaults]   # create ~/.config/alc-pjm/server.json
+pnpm pjm-server start               # read config, start next server with env vars
+```
+
+Config: `~/.config/alc-pjm/server.json` (port, dbPath, auth credentials). Maps to env vars and runs `next start` in foreground.
+
+### `pjm` — CLI client (AI-agent friendly)
+
+```bash
+pnpm pjm init                        # create ~/.config/alc-pjm/cli.json
+
+# Projects & Epics
+pnpm pjm project list
+pnpm pjm project create --key WEB --name "Web Platform"
+pnpm pjm epic list --project WEB     # --project accepts key or UUID
+pnpm pjm epic create --project WEB --name "Auth" [--description "..."]
+
+# Tickets
+pnpm pjm ticket list [--project WEB] [--status todo] [--priority p0] [--type bug]
+pnpm pjm ticket create --project WEB --type task --title "Do X" --priority p1
+pnpm pjm ticket get <id>
+pnpm pjm ticket update <id> [--title "..."] [--status in_progress] [--priority p0]
+pnpm pjm ticket transition <id> --status in_progress
+pnpm pjm ticket take <id>            # shortcut: → in_progress
+pnpm pjm ticket done <id>            # shortcut: → done
+pnpm pjm ticket archive <id>
+
+# AI-agent oriented
+pnpm pjm ticket next                 # highest-priority todo (p0 first, oldest first)
+pnpm pjm ticket mine                 # all todo + in_progress, sorted by priority
+```
+
+**Output**: JSON by default (machine-readable). Add `--pretty` for formatted JSON or `--format table` for human-readable tables. Errors go to stderr as JSON with exit code 1.
+
+**Auth**: auto-logs in via `/api/auth/login`, caches session cookie at `~/.config/alc-pjm/.session`, auto-refreshes on 401.
+
 ## Style / conventions
 
 - Strict TypeScript (`strict: true`, `allowJs: false`).

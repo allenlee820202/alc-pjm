@@ -17,6 +17,25 @@ const patchSchema = z.object({
   archived: z.boolean().optional(),
 });
 
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ ticketId: string }> },
+) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.res;
+  try {
+    const { ticketId } = await params;
+    const { Id } = await import("@/domain/shared/id");
+    const ticket = await getContainer().tickets.findById(Id.of<"Ticket">(ticketId));
+    if (!ticket) {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
+    return NextResponse.json({ ticket: ticket.toSnapshot() });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ ticketId: string }> },
