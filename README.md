@@ -122,6 +122,9 @@ All endpoints require an authenticated session cookie. JSON body / query params 
 | GET    | `/api/tickets/:ticketId`                      | —            |
 | POST   | `/api/tickets`                                | `{ projectId, epicId?, parentTicketId?, type, title, description?, priority }` |
 | PATCH  | `/api/tickets/:ticketId`                      | `{ title?, description?, priority?, epicId?, status?, archived? }` |
+| GET    | `/api/tickets/:ticketId/dependencies`         | —            |
+| POST   | `/api/tickets/:ticketId/dependencies`         | `{ dependsOnTicketId }` |
+| DELETE | `/api/tickets/:ticketId/dependencies`         | `{ dependsOnTicketId }` |
 | POST   | `/api/auth/login`                             | `{ email, password }` |
 | POST   | `/api/auth/logout`                            | —            |
 | GET    | `/api/db`                                     | —            |
@@ -206,10 +209,17 @@ pjm ticket take <id>            # shortcut: → in_progress
 pjm ticket done <id>            # shortcut: → done
 pjm ticket archive <id>
 
+# Dependencies
+pjm ticket dep list <id>        # show what this ticket depends on
+pjm ticket dep add <id> --on <other-id>    # add dependency
+pjm ticket dep remove <id> --on <other-id> # remove dependency
+
 # AI-agent workflow
 pjm ticket next                 # highest-priority todo (p0 first, oldest first)
 pjm ticket mine                 # all todo + in_progress, sorted by priority
 ```
+
+`ticket next` is **dependency-aware**: it only returns tickets whose `dependencyIds` are all in `done` status. This ensures automated dispatch loops process work in the correct order.
 
 #### Output formats
 

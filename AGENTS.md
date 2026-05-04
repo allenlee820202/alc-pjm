@@ -87,10 +87,17 @@ pnpm pjm ticket take <id>            # shortcut: → in_progress
 pnpm pjm ticket done <id>            # shortcut: → done
 pnpm pjm ticket archive <id>
 
+# Dependencies
+pnpm pjm ticket dep list <id>        # show what this ticket depends on
+pnpm pjm ticket dep add <id> --on <other-id>    # add dependency
+pnpm pjm ticket dep remove <id> --on <other-id> # remove dependency
+
 # AI-agent oriented
-pnpm pjm ticket next                 # highest-priority todo (p0 first, oldest first)
+pnpm pjm ticket next                 # highest-priority todo whose deps are all done
 pnpm pjm ticket mine                 # all todo + in_progress, sorted by priority
 ```
+
+`ticket next` is **dependency-aware**: it only returns tickets whose `dependencyIds` are all in `done` status. This ensures automated dispatch loops process work in the correct order.
 
 **Output**: JSON by default (machine-readable). Add `--pretty` for formatted JSON or `--format table` for human-readable tables. Errors go to stderr as JSON with exit code 1.
 
