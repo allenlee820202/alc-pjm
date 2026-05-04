@@ -17,6 +17,29 @@ const patchSchema = z.object({
   archived: z.boolean().optional(),
 });
 
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ ticketId: string }> },
+) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.res;
+  try {
+    const { ticketId } = await params;
+    const { Id } = await import("@/domain/shared/id");
+    const container = getContainer();
+    const ticket = await container.tickets.findById(Id.of<"Ticket">(ticketId));
+    if (!ticket) {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
+    const snapshot = ticket.toSnapshot();
+    const deps = await container.ticketDependencies.listByTicket(ticketId);
+    snapshot.dependencyIds = deps.map((d) => d.dependsOnTicketId);
+    return NextResponse.json({ ticket: snapshot });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ ticketId: string }> },
@@ -59,7 +82,10 @@ export async function PATCH(
     if (!final) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
-    return NextResponse.json({ ticket: final.toSnapshot() });
+    const snapshot = final.toSnapshot();
+    const deps = await c.ticketDependencies.listByTicket(ticketId);
+    snapshot.dependencyIds = deps.map((d) => d.dependsOnTicketId);
+    return NextResponse.json({ ticket: snapshot });
   } catch (e) {
     if (e instanceof z.ZodError) {
       return NextResponse.json(

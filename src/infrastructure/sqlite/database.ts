@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS tickets (
 CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_epic ON tickets(epic_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(parent_ticket_id);
+
+CREATE TABLE IF NOT EXISTS ticket_dependencies (
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  depends_on_ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (ticket_id, depends_on_ticket_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_deps_ticket ON ticket_dependencies(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_deps_depends_on ON ticket_dependencies(depends_on_ticket_id);
 `;
 
 /** Open a SQLite database file (creating the directory if needed) and apply schema. */

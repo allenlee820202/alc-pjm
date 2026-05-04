@@ -24,6 +24,8 @@ export interface TicketSnapshot {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** IDs of tickets this ticket depends on. Enriched by the API layer, not persisted in the aggregate. */
+  dependencyIds: string[];
 }
 
 export interface CreateTicketProps {
@@ -209,6 +211,7 @@ export class Ticket {
       archivedAt: this._archivedAt?.toISOString() ?? null,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this._updatedAt.toISOString(),
+      dependencyIds: [],
     };
   }
 

@@ -4,6 +4,10 @@
   "private": true,
   "description": "A lightweight Jira-like project management board built with Next.js, Supabase, and clean architecture.",
   "packageManager": "pnpm@10.33.0",
+  "bin": {
+    "pjm": "./bin/pjm.ts",
+    "pjm-server": "./bin/pjm-server.ts"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -13,7 +17,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install --with-deps chromium"
+    "test:e2e:install": "playwright install --with-deps chromium",
+    "pjm": "tsx bin/pjm.ts",
+    "pjm-server": "tsx bin/pjm-server.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
@@ -45,6 +51,7 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
+    "tsx": "^4.19.0",
     "vitest": "^2.1.4"
   }
 }
