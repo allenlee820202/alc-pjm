@@ -126,5 +126,6 @@ function toSnapshot(row: TicketRow): TicketSnapshot {
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    dependencyIds: [],
   };
 }

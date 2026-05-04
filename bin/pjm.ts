@@ -28,6 +28,7 @@ interface TicketSnapshot {
   id: string;
   priority: string;
   createdAt: string;
+  dependencyIds?: string[];
   [k: string]: unknown;
 }
 
@@ -244,10 +245,20 @@ async function cmdTicketArchive(client: Client, id: string): Promise<unknown> {
 }
 
 async function cmdTicketNext(client: Client): Promise<unknown> {
-  const result = await client.request("GET", "/api/tickets?status=todo");
-  if (!result.ok) printError("Failed to list tickets", result.data);
-  const tickets = (result.data as { tickets: TicketSnapshot[] }).tickets;
-  const sorted = sortTickets(tickets);
+  const [todoRes, doneRes] = await Promise.all([
+    client.request("GET", "/api/tickets?status=todo"),
+    client.request("GET", "/api/tickets?status=done"),
+  ]);
+  if (!todoRes.ok) printError("Failed to list tickets", todoRes.data);
+  if (!doneRes.ok) printError("Failed to list done tickets", doneRes.data);
+  const todos = (todoRes.data as { tickets: TicketSnapshot[] }).tickets;
+  const doneTickets = (doneRes.data as { tickets: TicketSnapshot[] }).tickets;
+  const doneIds = new Set(doneTickets.map((t) => t.id));
+  const eligible = todos.filter((t) => {
+    const deps = t.dependencyIds ?? [];
+    return deps.every((depId) => doneIds.has(depId));
+  });
+  const sorted = sortTickets(eligible);
   return sorted.length > 0 ? sorted[0] : null;
 }
 
@@ -262,6 +273,42 @@ async function cmdTicketMine(client: Client): Promise<unknown> {
   const todos = (todoRes.data as { tickets: TicketSnapshot[] }).tickets;
   const inProgress = (inProgressRes.data as { tickets: TicketSnapshot[] }).tickets;
   return sortTickets([...todos, ...inProgress]);
+}
+
+// ── Dependency commands ─────────────────────────────────────────────
+
+async function cmdTicketDepList(client: Client, ticketId: string): Promise<unknown> {
+  const result = await client.request("GET", `/api/tickets/${ticketId}/dependencies`);
+  if (!result.ok) printError("Failed to list dependencies", result.data);
+  return (result.data as { dependencies: unknown[] }).dependencies;
+}
+
+async function cmdTicketDepAdd(
+  client: Client,
+  ticketId: string,
+  flags: Flags,
+): Promise<unknown> {
+  const on = flags["on"];
+  if (!on || typeof on !== "string") printError("--on <dependsOnTicketId> is required");
+  const result = await client.request("POST", `/api/tickets/${ticketId}/dependencies`, {
+    dependsOnTicketId: on,
+  });
+  if (!result.ok) printError("Failed to add dependency", result.data);
+  return (result.data as { dependency: unknown }).dependency;
+}
+
+async function cmdTicketDepRemove(
+  client: Client,
+  ticketId: string,
+  flags: Flags,
+): Promise<unknown> {
+  const on = flags["on"];
+  if (!on || typeof on !== "string") printError("--on <dependsOnTicketId> is required");
+  const result = await client.request("DELETE", `/api/tickets/${ticketId}/dependencies`, {
+    dependsOnTicketId: on,
+  });
+  if (!result.ok) printError("Failed to remove dependency", result.data);
+  return (result.data as { ok: boolean });
 }
 
 // ── Main dispatcher ─────────────────────────────────────────────────
@@ -369,9 +416,30 @@ async function main(): Promise<void> {
         case "mine":
           result = await cmdTicketMine(client);
           break;
+        case "dep": {
+          const depAction = positionals[2];
+          const depTicketId = positionals[3];
+          switch (depAction) {
+            case "list":
+              if (!depTicketId) printError("Usage: pjm ticket dep list <ticketId>");
+              result = await cmdTicketDepList(client, depTicketId);
+              break;
+            case "add":
+              if (!depTicketId) printError("Usage: pjm ticket dep add <ticketId> --on <id>");
+              result = await cmdTicketDepAdd(client, depTicketId, flags);
+              break;
+            case "remove":
+              if (!depTicketId) printError("Usage: pjm ticket dep remove <ticketId> --on <id>");
+              result = await cmdTicketDepRemove(client, depTicketId, flags);
+              break;
+            default:
+              printError("Usage: pjm ticket dep <list|add|remove>");
+          }
+          break;
+        }
         default:
           printError(
-            "Usage: pjm ticket <list|create|get|update|transition|take|done|archive|next|mine>",
+            "Usage: pjm ticket <list|create|get|update|transition|take|done|archive|next|mine|dep>",
           );
       }
       break;

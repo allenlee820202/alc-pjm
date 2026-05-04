@@ -6,9 +6,13 @@ import { ListTicketsUseCase } from "./list-tickets";
 import { UpdateTicketUseCase } from "./update-ticket";
 import { TransitionTicketUseCase } from "./transition-ticket";
 import { ArchiveTicketUseCase, UnarchiveTicketUseCase } from "./archive-ticket";
+import { AddTicketDependencyUseCase } from "./add-ticket-dependency";
+import { RemoveTicketDependencyUseCase } from "./remove-ticket-dependency";
+import { ListTicketDependenciesUseCase } from "./list-ticket-dependencies";
 import { InMemoryProjectRepository } from "@/infrastructure/repositories/in-memory-project-repository";
 import { InMemoryEpicRepository } from "@/infrastructure/repositories/in-memory-epic-repository";
 import { InMemoryTicketRepository } from "@/infrastructure/repositories/in-memory-ticket-repository";
+import { InMemoryTicketDependencyRepository } from "@/infrastructure/repositories/in-memory-ticket-dependency-repository";
 import { NotFoundError, ValidationError } from "@/domain/shared/errors";
 import { Id } from "@/domain/shared/id";
 
@@ -16,6 +20,7 @@ describe("Use cases", () => {
   let projects: InMemoryProjectRepository;
   let epics: InMemoryEpicRepository;
   let tickets: InMemoryTicketRepository;
+  let ticketDeps: InMemoryTicketDependencyRepository;
   let createProject: CreateProjectUseCase;
   let createEpic: CreateEpicUseCase;
   let createTicket: CreateTicketUseCase;
@@ -24,11 +29,15 @@ describe("Use cases", () => {
   let transitionTicket: TransitionTicketUseCase;
   let archiveTicket: ArchiveTicketUseCase;
   let unarchiveTicket: UnarchiveTicketUseCase;
+  let addDep: AddTicketDependencyUseCase;
+  let removeDep: RemoveTicketDependencyUseCase;
+  let listDeps: ListTicketDependenciesUseCase;
 
   beforeEach(() => {
     projects = new InMemoryProjectRepository();
     epics = new InMemoryEpicRepository();
     tickets = new InMemoryTicketRepository();
+    ticketDeps = new InMemoryTicketDependencyRepository();
     createProject = new CreateProjectUseCase(projects);
     createEpic = new CreateEpicUseCase(projects, epics);
     createTicket = new CreateTicketUseCase(projects, epics, tickets);
@@ -37,6 +46,9 @@ describe("Use cases", () => {
     transitionTicket = new TransitionTicketUseCase(tickets);
     archiveTicket = new ArchiveTicketUseCase(tickets);
     unarchiveTicket = new UnarchiveTicketUseCase(tickets);
+    addDep = new AddTicketDependencyUseCase(tickets, ticketDeps);
+    removeDep = new RemoveTicketDependencyUseCase(ticketDeps);
+    listDeps = new ListTicketDependenciesUseCase(tickets, ticketDeps);
   });
 
   describe("CreateProjectUseCase", () => {
@@ -354,6 +366,134 @@ describe("Use cases", () => {
       await unarchiveTicket.execute({ ticketId: t.id.value });
       const visible = await listTickets.execute({ projectId: p.id.value });
       expect(visible).toHaveLength(1);
+    });
+  });
+
+  describe("Ticket dependencies", () => {
+    async function makeProject() {
+      return createProject.execute({ key: "PJM", name: "P" });
+    }
+
+    async function makeTicket(projectId: string, title: string) {
+      return createTicket.execute({
+        projectId,
+        type: "task",
+        title,
+        priority: "p1",
+      });
+    }
+
+    it("adds a dependency happy path", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      const dep = await addDep.execute({
+        ticketId: a.id.value,
+        dependsOnTicketId: b.id.value,
+      });
+      expect(dep.ticketId).toBe(a.id.value);
+      expect(dep.dependsOnTicketId).toBe(b.id.value);
+    });
+
+    it("rejects cross-project dependency", async () => {
+      const p1 = await createProject.execute({ key: "AA", name: "A" });
+      const p2 = await createProject.execute({ key: "BB", name: "B" });
+      const a = await makeTicket(p1.id.value, "A");
+      const b = await makeTicket(p2.id.value, "B");
+      await expect(
+        addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value }),
+      ).rejects.toThrow(/same project/i);
+    });
+
+    it("rejects dependency on archived target", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      await archiveTicket.execute({ ticketId: b.id.value });
+      await expect(
+        addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value }),
+      ).rejects.toThrow(/archived/i);
+    });
+
+    it("rejects dependency from archived source", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      await archiveTicket.execute({ ticketId: a.id.value });
+      await expect(
+        addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value }),
+      ).rejects.toThrow(/archived/i);
+    });
+
+    it("rejects direct cycle (A→B then B→A)", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+      await expect(
+        addDep.execute({ ticketId: b.id.value, dependsOnTicketId: a.id.value }),
+      ).rejects.toThrow(/cycle/i);
+    });
+
+    it("rejects transitive cycle (A→B→C then C→A)", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      const c = await makeTicket(p.id.value, "C");
+      await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+      await addDep.execute({ ticketId: b.id.value, dependsOnTicketId: c.id.value });
+      await expect(
+        addDep.execute({ ticketId: c.id.value, dependsOnTicketId: a.id.value }),
+      ).rejects.toThrow(/cycle/i);
+    });
+
+    it("lists dependencies for a ticket", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      const c = await makeTicket(p.id.value, "C");
+      await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+      await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: c.id.value });
+      const deps = await listDeps.execute({ ticketId: a.id.value });
+      expect(deps).toHaveLength(2);
+      const depIds = deps.map((d) => d.dependsOnTicketId).sort();
+      expect(depIds).toEqual([b.id.value, c.id.value].sort());
+    });
+
+    it("list dependencies rejects missing ticket", async () => {
+      await expect(
+        listDeps.execute({ ticketId: Id.generate().value }),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it("removes a dependency idempotently", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+      await removeDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+      const deps = await listDeps.execute({ ticketId: a.id.value });
+      expect(deps).toHaveLength(0);
+      // Second remove should not throw
+      await removeDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+    });
+
+    it("rejects self-dependency at the use-case level (via domain)", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      await expect(
+        addDep.execute({ ticketId: a.id.value, dependsOnTicketId: a.id.value }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it("add dependency is idempotent", async () => {
+      const p = await makeProject();
+      const a = await makeTicket(p.id.value, "A");
+      const b = await makeTicket(p.id.value, "B");
+      await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+      await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
+      const deps = await listDeps.execute({ ticketId: a.id.value });
+      expect(deps).toHaveLength(1);
     });
   });
 });

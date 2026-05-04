@@ -14,6 +14,7 @@ A lightweight, Jira-like project management board built with **Next.js 15**, **T
 - Status workflow: `todo` → `in_progress` → `done`
 - Subtask invariants enforced in the domain (must have a non-subtask parent in the same project)
 - REST API (`/api/projects`, `/api/epics`, `/api/tickets`) with cookie-session auth
+- **CLI tools** for headless operation and AI-agent integration (`pjm-server`, `pjm`)
 
 ## Tech stack
 
@@ -118,7 +119,9 @@ All endpoints require an authenticated session cookie. JSON body / query params 
 | GET    | `/api/epics?projectId=…`                      | —            |
 | POST   | `/api/epics`                                  | `{ projectId, name, description? }` |
 | GET    | `/api/tickets?projectId=…&epicId=…&status=…`  | —            |
+| GET    | `/api/tickets/:ticketId`                      | —            |
 | POST   | `/api/tickets`                                | `{ projectId, epicId?, parentTicketId?, type, title, description?, priority }` |
+| PATCH  | `/api/tickets/:ticketId`                      | `{ title?, description?, priority?, epicId?, status?, archived? }` |
 | POST   | `/api/auth/login`                             | `{ email, password }` |
 | POST   | `/api/auth/logout`                            | —            |
 | GET    | `/api/db`                                     | —            |
@@ -136,6 +139,104 @@ This repo is configured for **Vercel**:
 3. Push to `main` — GitHub Actions runs lint/typecheck/unit/E2E, and Vercel's Git integration deploys the build.
 
 Optionally, add a Vercel Deploy Hook URL as the `VERCEL_DEPLOY_HOOK_URL` repository secret to also trigger a deploy from the CI workflow after tests pass.
+
+## CLI tools
+
+Two CLI tools in `bin/` provide headless access to alc-pjm. They run via `tsx` (devDependency) and have zero additional runtime dependencies.
+
+### `pjm-server` — server launcher
+
+Start a self-contained alc-pjm server from a single config file:
+
+```bash
+pnpm pjm-server init              # interactive setup → ~/.config/alc-pjm/server.json
+pnpm pjm-server init --defaults   # write defaults without prompting
+pnpm pjm-server start             # start the server (foreground)
+```
+
+Config (`~/.config/alc-pjm/server.json`):
+
+```jsonc
+{
+  "port": 3000,
+  "dbPath": "~/.config/alc-pjm/data/alc-pjm.db",   // auto-created
+  "auth": { "email": "admin@local", "password": "changeme" }
+}
+```
+
+`start` maps config values to environment variables (`PORT`, `DB_PATH`, `REPO_MODE=sqlite`, `AUTH_MODE=stub`, `STUB_AUTH_*`) and runs `next start` in the foreground. A production build (`pnpm build`) is required first.
+
+### `pjm` — CLI client
+
+A machine-friendly CLI for managing projects, epics, and tickets. Designed for AI agents (Claude Code, OpenCode, etc.) but works for humans too.
+
+```bash
+pnpm pjm init                        # create ~/.config/alc-pjm/cli.json
+```
+
+Config (`~/.config/alc-pjm/cli.json`):
+
+```jsonc
+{
+  "server": "http://localhost:3000",
+  "auth": { "email": "admin@local", "password": "changeme" }
+}
+```
+
+The CLI auto-logs in on first request and caches the session cookie at `~/.config/alc-pjm/.session`. On 401 it re-authenticates automatically.
+
+#### Commands
+
+```bash
+# Projects
+pjm project list
+pjm project create --key WEB --name "Web Platform"
+
+# Epics (--project accepts key or UUID)
+pjm epic list --project WEB
+pjm epic create --project WEB --name "Auth" --description "Login flows"
+
+# Tickets
+pjm ticket list [--project WEB] [--status todo] [--priority p0] [--type bug]
+pjm ticket create --project WEB --type task --title "Do X" --priority p1
+pjm ticket get <id>
+pjm ticket update <id> [--title "…"] [--status in_progress] [--priority p0]
+pjm ticket transition <id> --status in_progress
+pjm ticket take <id>            # shortcut: → in_progress
+pjm ticket done <id>            # shortcut: → done
+pjm ticket archive <id>
+
+# AI-agent workflow
+pjm ticket next                 # highest-priority todo (p0 first, oldest first)
+pjm ticket mine                 # all todo + in_progress, sorted by priority
+```
+
+#### Output formats
+
+| Flag | Effect |
+| ---- | ------ |
+| *(none)* | Compact JSON — one line, machine-readable |
+| `--pretty` | Pretty-printed JSON |
+| `--format table` | Human-readable aligned table |
+
+Errors are written to stderr as JSON with exit code 1.
+
+#### Typical AI-agent loop
+
+```bash
+# 1. Pick the next task
+TICKET=$(pjm ticket next)
+ID=$(echo "$TICKET" | jq -r '.id')
+TITLE=$(echo "$TICKET" | jq -r '.title')
+
+# 2. Claim it
+pjm ticket take "$ID"
+
+# 3. Do the work…
+
+# 4. Mark done
+pjm ticket done "$ID"
+```
 
 ## Switching to real Supabase persistence
 

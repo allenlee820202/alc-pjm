@@ -27,8 +27,24 @@ export async function GET(req: NextRequest) {
   try {
     const params = Object.fromEntries(req.nextUrl.searchParams.entries());
     const filters = listSchema.parse(params);
-    const tickets = await getContainer().listTickets.execute(filters);
-    return NextResponse.json({ tickets: tickets.map((t) => t.toSnapshot()) });
+    const container = getContainer();
+    const tickets = await container.listTickets.execute(filters);
+    const snapshots = tickets.map((t) => t.toSnapshot());
+
+    // Enrich with dependency information
+    const ticketIds = snapshots.map((s) => s.id);
+    const allDeps = await container.ticketDependencies.listByTicketIds(ticketIds);
+    const depsByTicket = new Map<string, string[]>();
+    for (const dep of allDeps) {
+      const list = depsByTicket.get(dep.ticketId) ?? [];
+      list.push(dep.dependsOnTicketId);
+      depsByTicket.set(dep.ticketId, list);
+    }
+    for (const snap of snapshots) {
+      snap.dependencyIds = depsByTicket.get(snap.id) ?? [];
+    }
+
+    return NextResponse.json({ tickets: snapshots });
   } catch (e) {
     return toErrorResponse(e);
   }
