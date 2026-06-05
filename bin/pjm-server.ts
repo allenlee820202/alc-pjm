@@ -12,6 +12,7 @@ import {
   writeJsonFile,
 } from "./_shared/fs-config.js";
 import { printError } from "./_shared/output.js";
+import { projectRootFromModuleUrl } from "./_shared/project-root.js";
 
 interface ServerConfig {
   port: number;
@@ -20,6 +21,7 @@ interface ServerConfig {
 }
 
 const CONFIG_PATH = resolve(CONFIG_DIR, "server.json");
+const PROJECT_ROOT = projectRootFromModuleUrl(import.meta.url);
 
 const DEFAULT_CONFIG: ServerConfig = {
   port: 3000,
@@ -94,7 +96,7 @@ function cmdStart(): void {
   const child = spawn("npx", ["next", "start", "-p", String(port)], {
     stdio: "inherit",
     env,
-    cwd: resolve(import.meta.dirname, ".."),
+    cwd: PROJECT_ROOT,
   });
 
   child.on("exit", (code) => {
