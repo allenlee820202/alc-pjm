@@ -11,7 +11,7 @@ A lightweight, Jira-like project management board built with **Next.js 15**, **T
 - **Epics** categorize related tickets within a project
 - **Tickets** in four flavors: `story`, `task`, `subtask`, `bug`
 - Priority labels: **p0** (most urgent) / **p1** / **p2**
-- Status workflow: `todo` → `in_progress` → `done`
+- Status workflow: `todo` → `in_progress` → `done`, with direct `todo` → `done` resolution allowed
 - Subtask invariants enforced in the domain (must have a non-subtask parent in the same project)
 - REST API (`/api/projects`, `/api/epics`, `/api/tickets`) with cookie-session auth
 - **CLI tools** for headless operation and AI-agent integration (`pjm-server`, `pjm`)

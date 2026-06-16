@@ -11,16 +11,17 @@ describe("TicketStatus", () => {
     expect(() => TicketStatus.of("blocked")).toThrow(ValidationError);
   });
 
-  it("permits todo -> in_progress -> done", () => {
+  it("permits todo -> in_progress -> done and direct todo -> done", () => {
     const todo = TicketStatus.of("todo");
     const inProgress = TicketStatus.of("in_progress");
     const done = TicketStatus.of("done");
     expect(todo.canTransitionTo(inProgress)).toBe(true);
+    expect(todo.canTransitionTo(done)).toBe(true);
     expect(inProgress.canTransitionTo(done)).toBe(true);
   });
 
-  it("forbids skipping in_progress", () => {
-    expect(TicketStatus.of("todo").canTransitionTo(TicketStatus.of("done"))).toBe(false);
+  it("forbids done -> todo", () => {
+    expect(TicketStatus.of("done").canTransitionTo(TicketStatus.of("todo"))).toBe(false);
   });
 
   it("permits reopening done -> in_progress", () => {
