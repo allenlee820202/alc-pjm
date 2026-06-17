@@ -19,10 +19,10 @@ export class TicketStatus {
     return new TicketStatus("todo");
   }
 
-  /** Allowed forward transitions following a simple kanban flow. */
+  /** Allowed workflow transitions for the kanban board. */
   canTransitionTo(next: TicketStatus): boolean {
     const allowed: Record<TicketStatusValue, TicketStatusValue[]> = {
-      todo: ["in_progress"],
+      todo: ["in_progress", "done"],
       in_progress: ["todo", "done"],
       done: ["in_progress"],
     };

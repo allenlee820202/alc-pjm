@@ -127,11 +127,20 @@ describe("Ticket aggregate", () => {
       title: "T",
       priority: Priority.of("p2"),
     });
-    expect(() => t.transitionTo(TicketStatus.of("done"))).toThrow(ValidationError);
-    t.transitionTo(TicketStatus.of("in_progress"));
-    expect(t.status.value).toBe("in_progress");
     t.transitionTo(TicketStatus.of("done"));
     expect(t.status.value).toBe("done");
+    expect(() => t.transitionTo(TicketStatus.of("todo"))).toThrow(ValidationError);
+
+    const normalPath = Ticket.create({
+      projectId,
+      type: TicketType.of("task"),
+      title: "Normal path",
+      priority: Priority.of("p2"),
+    });
+    normalPath.transitionTo(TicketStatus.of("in_progress"));
+    expect(normalPath.status.value).toBe("in_progress");
+    normalPath.transitionTo(TicketStatus.of("done"));
+    expect(normalPath.status.value).toBe("done");
   });
 
   it("snapshot round-trips", () => {

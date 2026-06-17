@@ -291,7 +291,7 @@ describe("Use cases", () => {
   });
 
   describe("TransitionTicketUseCase", () => {
-    it("moves a ticket through the workflow", async () => {
+    it("moves a ticket directly from todo to done", async () => {
       const p = await createProject.execute({ key: "PJM", name: "P" });
       const t = await createTicket.execute({
         projectId: p.id.value,
@@ -299,11 +299,6 @@ describe("Use cases", () => {
         title: "x",
         priority: "p2",
       });
-      const inProg = await transitionTicket.execute({
-        ticketId: t.id.value,
-        status: "in_progress",
-      });
-      expect(inProg.status.value).toBe("in_progress");
       const done = await transitionTicket.execute({
         ticketId: t.id.value,
         status: "done",
@@ -319,8 +314,9 @@ describe("Use cases", () => {
         title: "x",
         priority: "p2",
       });
+      await transitionTicket.execute({ ticketId: t.id.value, status: "done" });
       await expect(
-        transitionTicket.execute({ ticketId: t.id.value, status: "done" }),
+        transitionTicket.execute({ ticketId: t.id.value, status: "todo" }),
       ).rejects.toThrow(ValidationError);
     });
   });

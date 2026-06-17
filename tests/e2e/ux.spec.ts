@@ -48,7 +48,7 @@ test.describe("Kanban board view", () => {
 });
 
 test.describe("Status transitions via dropdown", () => {
-  test("moves a ticket from todo to in_progress to done", async ({ page }) => {
+  test("moves a ticket directly from todo to done", async ({ page }) => {
     await login(page);
     const key = `ST${Date.now().toString().slice(-5)}`;
     await createProject(page, key);
@@ -58,13 +58,7 @@ test.describe("Status transitions via dropdown", () => {
     const ticketId = await row.getAttribute("data-ticket-id");
     expect(ticketId).toBeTruthy();
 
-    // todo -> in_progress
-    await page.getByTestId(`status-select-${ticketId}`).selectOption("in_progress");
-    await expect(
-      page.getByTestId("column-in_progress").getByText("Move me"),
-    ).toBeVisible();
-
-    // in_progress -> done
+    // todo -> done
     await page.getByTestId(`status-select-${ticketId}`).selectOption("done");
     await expect(page.getByTestId("column-done").getByText("Move me")).toBeVisible();
   });
@@ -214,10 +208,16 @@ test.describe("API: PATCH and DELETE", () => {
     });
     const { ticket } = (await created.json()) as { ticket: { id: string } };
 
-    // todo -> done is not allowed.
+    // todo -> done is allowed.
     const res = await api.patch(`/api/tickets/${ticket.id}`, {
       data: { status: "done" },
     });
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(200);
+
+    // done -> todo is not allowed.
+    const invalid = await api.patch(`/api/tickets/${ticket.id}`, {
+      data: { status: "todo" },
+    });
+    expect(invalid.status()).toBe(400);
   });
 });
