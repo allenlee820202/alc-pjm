@@ -119,6 +119,8 @@ All endpoints require an authenticated session cookie. JSON body / query params 
 | GET    | `/api/epics?projectId=…`                      | —            |
 | POST   | `/api/epics`                                  | `{ projectId, name, description? }` |
 | GET    | `/api/tickets?projectId=…&epicId=…&status=…`  | —            |
+| GET    | `/api/tickets/queue?mode=mine&limit=50`        | optimized CLI queue (`{ tickets }`) |
+| GET    | `/api/tickets/queue?mode=next`                 | optimized next ticket (`{ ticket }`) |
 | GET    | `/api/tickets/:ticketId`                      | —            |
 | POST   | `/api/tickets`                                | `{ projectId, epicId?, parentTicketId?, type, title, description?, priority }` |
 | PATCH  | `/api/tickets/:ticketId`                      | `{ title?, description?, priority?, epicId?, status?, archived? }` |
@@ -208,7 +210,7 @@ pjm ticket archive <id>
 
 # AI-agent workflow
 pjm ticket next                 # highest-priority todo (p0 first, oldest first)
-pjm ticket mine                 # all todo + in_progress, sorted by priority
+pjm ticket mine [--limit 50]    # todo + in_progress, sorted by priority
 ```
 
 #### Output formats

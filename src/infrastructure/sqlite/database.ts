@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_epic ON tickets(epic_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(parent_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_queue ON tickets(archived, status, priority, created_at);
 
 CREATE TABLE IF NOT EXISTS ticket_dependencies (
   ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,

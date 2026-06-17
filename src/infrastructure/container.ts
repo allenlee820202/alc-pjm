@@ -2,15 +2,20 @@ import type { ProjectRepository } from "@/application/ports/project-repository";
 import type { EpicRepository } from "@/application/ports/epic-repository";
 import type { TicketRepository } from "@/application/ports/ticket-repository";
 import type { TicketDependencyRepository } from "@/application/ports/ticket-dependency-repository";
+import type { TicketQueueRepository } from "@/application/ports/ticket-queue-repository";
 import type { AuthService } from "@/application/ports/auth-service";
 
 import { InMemoryProjectRepository } from "@/infrastructure/repositories/in-memory-project-repository";
 import { InMemoryEpicRepository } from "@/infrastructure/repositories/in-memory-epic-repository";
 import { InMemoryTicketRepository } from "@/infrastructure/repositories/in-memory-ticket-repository";
 import { InMemoryTicketDependencyRepository } from "@/infrastructure/repositories/in-memory-ticket-dependency-repository";
+import { InMemoryTicketQueueRepository } from "@/infrastructure/repositories/in-memory-ticket-queue-repository";
 import { SqliteProjectRepository } from "@/infrastructure/repositories/sqlite-project-repository";
 import { SqliteEpicRepository } from "@/infrastructure/repositories/sqlite-epic-repository";
-import { SqliteTicketRepository } from "@/infrastructure/repositories/sqlite-ticket-repository";
+import {
+  SqliteTicketQueueRepository,
+  SqliteTicketRepository,
+} from "@/infrastructure/repositories/sqlite-ticket-repository";
 import { SqliteTicketDependencyRepository } from "@/infrastructure/repositories/sqlite-ticket-dependency-repository";
 import { openDatabase, type DatabaseType } from "@/infrastructure/sqlite/database";
 import { resolveDbPath, persistDbPath } from "@/infrastructure/sqlite/db-path";
@@ -31,12 +36,15 @@ import {
 import { AddTicketDependencyUseCase } from "@/application/use-cases/add-ticket-dependency";
 import { RemoveTicketDependencyUseCase } from "@/application/use-cases/remove-ticket-dependency";
 import { ListTicketDependenciesUseCase } from "@/application/use-cases/list-ticket-dependencies";
+import { GetNextQueueTicketUseCase } from "@/application/use-cases/get-next-queue-ticket";
+import { ListMineQueueTicketsUseCase } from "@/application/use-cases/list-mine-queue-tickets";
 
 interface Container {
   projects: ProjectRepository;
   epics: EpicRepository;
   tickets: TicketRepository;
   ticketDependencies: TicketDependencyRepository;
+  ticketQueue: TicketQueueRepository;
   auth: AuthService;
   createProject: CreateProjectUseCase;
   createEpic: CreateEpicUseCase;
@@ -51,6 +59,8 @@ interface Container {
   addTicketDependency: AddTicketDependencyUseCase;
   removeTicketDependency: RemoveTicketDependencyUseCase;
   listTicketDependencies: ListTicketDependenciesUseCase;
+  getNextQueueTicket: GetNextQueueTicketUseCase;
+  listMineQueueTickets: ListMineQueueTicketsUseCase;
   /** Mode currently in use ("memory" | "sqlite" | "supabase"). */
   repoMode: string;
   /** Absolute path of the SQLite file when repoMode === "sqlite", else null. */
@@ -74,6 +84,7 @@ function buildContainer(): Container {
   let epics: EpicRepository;
   let tickets: TicketRepository;
   let ticketDependencies: TicketDependencyRepository;
+  let ticketQueue: TicketQueueRepository;
   let db: DatabaseType | null = null;
   let dbPath: string | null = null;
 
@@ -84,6 +95,7 @@ function buildContainer(): Container {
     epics = new SqliteEpicRepository(db);
     tickets = new SqliteTicketRepository(db);
     ticketDependencies = new SqliteTicketDependencyRepository(db);
+    ticketQueue = new SqliteTicketQueueRepository(db);
   } else {
     if (repoMode !== "memory") {
       // eslint-disable-next-line no-console
@@ -95,6 +107,7 @@ function buildContainer(): Container {
     epics = new InMemoryEpicRepository();
     tickets = new InMemoryTicketRepository();
     ticketDependencies = new InMemoryTicketDependencyRepository();
+    ticketQueue = new InMemoryTicketQueueRepository(tickets, ticketDependencies);
   }
 
   let auth: AuthService = new StubAuthService();
@@ -120,6 +133,7 @@ function buildContainer(): Container {
     epics,
     tickets,
     ticketDependencies,
+    ticketQueue,
     auth,
     createProject: new CreateProjectUseCase(projects),
     createEpic: new CreateEpicUseCase(projects, epics),
@@ -134,6 +148,8 @@ function buildContainer(): Container {
     addTicketDependency: new AddTicketDependencyUseCase(tickets, ticketDependencies),
     removeTicketDependency: new RemoveTicketDependencyUseCase(ticketDependencies),
     listTicketDependencies: new ListTicketDependenciesUseCase(tickets, ticketDependencies),
+    getNextQueueTicket: new GetNextQueueTicketUseCase(ticketQueue),
+    listMineQueueTickets: new ListMineQueueTicketsUseCase(ticketQueue),
     repoMode,
     dbPath,
     _db: db,
