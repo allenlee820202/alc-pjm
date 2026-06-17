@@ -3,6 +3,7 @@ import type {
   TicketListFilters,
   TicketRepository,
 } from "@/application/ports/ticket-repository";
+import type { TicketQueueRepository } from "@/application/ports/ticket-queue-repository";
 import { Ticket, type TicketId } from "@/domain/ticket/ticket";
 import type { TicketSnapshot } from "@/domain/ticket/ticket";
 
@@ -107,6 +108,50 @@ export class SqliteTicketRepository implements TicketRepository {
     } ORDER BY created_at ASC`;
 
     const rows = this.db.prepare<typeof params, TicketRow>(sql).all(params);
+    return rows.map((r) => Ticket.fromSnapshot(toSnapshot(r)));
+  }
+}
+
+export class SqliteTicketQueueRepository implements TicketQueueRepository {
+  constructor(private readonly db: DatabaseType) {}
+
+  async findNextTicket(): Promise<Ticket | null> {
+    const row = this.db
+      .prepare<[], TicketRow>(
+        `SELECT t.*
+           FROM tickets t
+          WHERE t.archived = 0
+            AND t.status = 'todo'
+            AND NOT EXISTS (
+              SELECT 1
+                FROM ticket_dependencies td
+                LEFT JOIN tickets dep ON dep.id = td.depends_on_ticket_id
+               WHERE td.ticket_id = t.id
+                 AND (dep.id IS NULL OR dep.archived != 0 OR dep.status != 'done')
+            )
+          ORDER BY t.priority ASC, t.created_at ASC
+          LIMIT 1`,
+      )
+      .get();
+
+    return row ? Ticket.fromSnapshot(toSnapshot(row)) : null;
+  }
+
+  async listMineTickets(input: { limit?: number } = {}): Promise<Ticket[]> {
+    const params: Record<string, number> = {};
+    const limitSql = input.limit ? " LIMIT @limit" : "";
+    if (input.limit) params.limit = input.limit;
+
+    const rows = this.db
+      .prepare<typeof params, TicketRow>(
+        `SELECT *
+           FROM tickets
+          WHERE archived = 0
+            AND status IN ('todo', 'in_progress')
+          ORDER BY priority ASC, created_at ASC${limitSql}`,
+      )
+      .all(params);
+
     return rows.map((r) => Ticket.fromSnapshot(toSnapshot(r)));
   }
 }

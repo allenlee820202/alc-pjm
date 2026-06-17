@@ -109,6 +109,17 @@ function sortTickets(tickets: TicketSnapshot[]): TicketSnapshot[] {
   });
 }
 
+function parseLimit(flags: Flags): number | undefined {
+  const raw = flags["limit"];
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string") printError("--limit requires a positive integer");
+  const limit = Number(raw);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    printError("--limit requires a positive integer");
+  }
+  return limit;
+}
+
 // ── Command handlers ────────────────────────────────────────────────
 
 type Client = ReturnType<typeof createClient>;
@@ -245,6 +256,10 @@ async function cmdTicketArchive(client: Client, id: string): Promise<unknown> {
 }
 
 async function cmdTicketNext(client: Client): Promise<unknown> {
+  const queueRes = await client.request("GET", "/api/tickets/queue?mode=next");
+  if (queueRes.ok) return (queueRes.data as { ticket: TicketSnapshot | null }).ticket;
+  if (queueRes.status !== 404) printError("Failed to get next ticket", queueRes.data);
+
   const [todoRes, doneRes] = await Promise.all([
     client.request("GET", "/api/tickets?status=todo"),
     client.request("GET", "/api/tickets?status=done"),
@@ -262,7 +277,17 @@ async function cmdTicketNext(client: Client): Promise<unknown> {
   return sorted.length > 0 ? sorted[0] : null;
 }
 
-async function cmdTicketMine(client: Client): Promise<unknown> {
+async function cmdTicketMine(client: Client, flags: Flags): Promise<unknown> {
+  const limit = parseLimit(flags);
+  const params = new URLSearchParams({ mode: "mine" });
+  if (limit !== undefined) params.set("limit", String(limit));
+  const queueRes = await client.request(
+    "GET",
+    `/api/tickets/queue?${params.toString()}`,
+  );
+  if (queueRes.ok) return (queueRes.data as { tickets: TicketSnapshot[] }).tickets;
+  if (queueRes.status !== 404) printError("Failed to list mine tickets", queueRes.data);
+
   const [todoRes, inProgressRes] = await Promise.all([
     client.request("GET", "/api/tickets?status=todo"),
     client.request("GET", "/api/tickets?status=in_progress"),
@@ -272,7 +297,8 @@ async function cmdTicketMine(client: Client): Promise<unknown> {
     printError("Failed to list in_progress tickets", inProgressRes.data);
   const todos = (todoRes.data as { tickets: TicketSnapshot[] }).tickets;
   const inProgress = (inProgressRes.data as { tickets: TicketSnapshot[] }).tickets;
-  return sortTickets([...todos, ...inProgress]);
+  const sorted = sortTickets([...todos, ...inProgress]);
+  return limit !== undefined ? sorted.slice(0, limit) : sorted;
 }
 
 // ── Dependency commands ─────────────────────────────────────────────
@@ -414,7 +440,7 @@ async function main(): Promise<void> {
           result = await cmdTicketNext(client);
           break;
         case "mine":
-          result = await cmdTicketMine(client);
+          result = await cmdTicketMine(client, flags);
           break;
         case "dep": {
           const depAction = positionals[2];

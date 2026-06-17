@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { openDatabase, type DatabaseType } from "@/infrastructure/sqlite/database";
 import { SqliteProjectRepository } from "@/infrastructure/repositories/sqlite-project-repository";
 import { SqliteEpicRepository } from "@/infrastructure/repositories/sqlite-epic-repository";
-import { SqliteTicketRepository } from "@/infrastructure/repositories/sqlite-ticket-repository";
+import {
+  SqliteTicketQueueRepository,
+  SqliteTicketRepository,
+} from "@/infrastructure/repositories/sqlite-ticket-repository";
+import { SqliteTicketDependencyRepository } from "@/infrastructure/repositories/sqlite-ticket-dependency-repository";
 
 import { Project } from "@/domain/project/project";
 import { Epic } from "@/domain/epic/epic";
@@ -14,6 +18,7 @@ import { Ticket } from "@/domain/ticket/ticket";
 import { Priority } from "@/domain/ticket/priority";
 import { TicketType } from "@/domain/ticket/ticket-type";
 import { TicketStatus } from "@/domain/ticket/ticket-status";
+import { TicketDependency } from "@/domain/ticket/ticket-dependency";
 
 let dir: string;
 let db: DatabaseType;
@@ -145,5 +150,66 @@ describe("SqliteTicketRepository", () => {
     expect(list).toHaveLength(2);
     // Suppress the seed-scope `tickets` lint (used implicitly via DB).
     void tickets;
+  });
+
+  it("lists mine tickets in queue order with a SQL limit", async () => {
+    const { t2 } = await seed();
+    const queue = new SqliteTicketQueueRepository(db);
+
+    const result = await queue.listMineTickets({ limit: 1 });
+
+    expect(result.map((t) => t.id.value)).toEqual([t2.id.value]);
+  });
+
+  it("finds the next ticket using dependency status in SQL", async () => {
+    const projects = new SqliteProjectRepository(db);
+    const tickets = new SqliteTicketRepository(db);
+    const deps = new SqliteTicketDependencyRepository(db);
+    const queue = new SqliteTicketQueueRepository(db);
+    const p = Project.create({ key: "PJM", name: "P" });
+    await projects.save(p);
+
+    const blocker = Ticket.create({
+      projectId: p.id,
+      type: TicketType.of("task"),
+      title: "blocker",
+      priority: Priority.of("p1"),
+      status: TicketStatus.of("in_progress"),
+      createdAt: new Date("2025-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+    });
+    const blockedHighPriority = Ticket.create({
+      projectId: p.id,
+      type: TicketType.of("task"),
+      title: "blocked",
+      priority: Priority.of("p0"),
+      createdAt: new Date("2025-01-02T00:00:00.000Z"),
+      updatedAt: new Date("2025-01-02T00:00:00.000Z"),
+    });
+    const fallback = Ticket.create({
+      projectId: p.id,
+      type: TicketType.of("task"),
+      title: "fallback",
+      priority: Priority.of("p2"),
+      createdAt: new Date("2025-01-03T00:00:00.000Z"),
+      updatedAt: new Date("2025-01-03T00:00:00.000Z"),
+    });
+    await tickets.save(blocker);
+    await tickets.save(blockedHighPriority);
+    await tickets.save(fallback);
+    await deps.save(
+      TicketDependency.create({
+        ticketId: blockedHighPriority.id.value,
+        dependsOnTicketId: blocker.id.value,
+      }),
+    );
+
+    expect((await queue.findNextTicket())?.id.value).toBe(fallback.id.value);
+
+    blocker.transitionTo(TicketStatus.of("done"));
+    await tickets.save(blocker);
+    expect((await queue.findNextTicket())?.id.value).toBe(
+      blockedHighPriority.id.value,
+    );
   });
 });

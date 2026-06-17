@@ -9,10 +9,13 @@ import { ArchiveTicketUseCase, UnarchiveTicketUseCase } from "./archive-ticket";
 import { AddTicketDependencyUseCase } from "./add-ticket-dependency";
 import { RemoveTicketDependencyUseCase } from "./remove-ticket-dependency";
 import { ListTicketDependenciesUseCase } from "./list-ticket-dependencies";
+import { GetNextQueueTicketUseCase } from "./get-next-queue-ticket";
+import { ListMineQueueTicketsUseCase } from "./list-mine-queue-tickets";
 import { InMemoryProjectRepository } from "@/infrastructure/repositories/in-memory-project-repository";
 import { InMemoryEpicRepository } from "@/infrastructure/repositories/in-memory-epic-repository";
 import { InMemoryTicketRepository } from "@/infrastructure/repositories/in-memory-ticket-repository";
 import { InMemoryTicketDependencyRepository } from "@/infrastructure/repositories/in-memory-ticket-dependency-repository";
+import { InMemoryTicketQueueRepository } from "@/infrastructure/repositories/in-memory-ticket-queue-repository";
 import { NotFoundError, ValidationError } from "@/domain/shared/errors";
 import { Id } from "@/domain/shared/id";
 
@@ -32,6 +35,8 @@ describe("Use cases", () => {
   let addDep: AddTicketDependencyUseCase;
   let removeDep: RemoveTicketDependencyUseCase;
   let listDeps: ListTicketDependenciesUseCase;
+  let getNextQueueTicket: GetNextQueueTicketUseCase;
+  let listMineQueueTickets: ListMineQueueTicketsUseCase;
 
   beforeEach(() => {
     projects = new InMemoryProjectRepository();
@@ -49,6 +54,9 @@ describe("Use cases", () => {
     addDep = new AddTicketDependencyUseCase(tickets, ticketDeps);
     removeDep = new RemoveTicketDependencyUseCase(ticketDeps);
     listDeps = new ListTicketDependenciesUseCase(tickets, ticketDeps);
+    const ticketQueue = new InMemoryTicketQueueRepository(tickets, ticketDeps);
+    getNextQueueTicket = new GetNextQueueTicketUseCase(ticketQueue);
+    listMineQueueTickets = new ListMineQueueTicketsUseCase(ticketQueue);
   });
 
   describe("CreateProjectUseCase", () => {
@@ -490,6 +498,79 @@ describe("Use cases", () => {
       await addDep.execute({ ticketId: a.id.value, dependsOnTicketId: b.id.value });
       const deps = await listDeps.execute({ ticketId: a.id.value });
       expect(deps).toHaveLength(1);
+    });
+  });
+
+  describe("Queue tickets", () => {
+    it("returns the next todo ticket whose dependencies are done", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const blocker = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "blocker",
+        priority: "p1",
+      });
+      const blockedHighPriority = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "blocked",
+        priority: "p0",
+      });
+      const fallback = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "fallback",
+        priority: "p2",
+      });
+      await addDep.execute({
+        ticketId: blockedHighPriority.id.value,
+        dependsOnTicketId: blocker.id.value,
+      });
+      await transitionTicket.execute({
+        ticketId: blocker.id.value,
+        status: "in_progress",
+      });
+
+      expect((await getNextQueueTicket.execute())?.id.value).toBe(fallback.id.value);
+
+      await transitionTicket.execute({ ticketId: blocker.id.value, status: "done" });
+      expect((await getNextQueueTicket.execute())?.id.value).toBe(
+        blockedHighPriority.id.value,
+      );
+    });
+
+    it("lists todo and in-progress tickets with optional limit", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "p2-old",
+        priority: "p2",
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const high = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "p0-mid",
+        priority: "p0",
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const inProgress = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "p1-new",
+        priority: "p1",
+      });
+      await transitionTicket.execute({
+        ticketId: inProgress.id.value,
+        status: "in_progress",
+      });
+
+      const result = await listMineQueueTickets.execute({ limit: 2 });
+      expect(result.map((t) => t.id.value)).toEqual([
+        high.id.value,
+        inProgress.id.value,
+      ]);
     });
   });
 });
