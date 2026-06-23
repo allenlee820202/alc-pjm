@@ -124,6 +124,8 @@ All endpoints require an authenticated session cookie. JSON body / query params 
 | GET    | `/api/tickets/:ticketId`                      | —            |
 | POST   | `/api/tickets`                                | `{ projectId, epicId?, parentTicketId?, type, title, description?, priority }` |
 | PATCH  | `/api/tickets/:ticketId`                      | `{ title?, description?, priority?, epicId?, status?, archived? }` |
+| POST   | `/api/tickets/:ticketId/take`                 | idempotently claim a todo/in-progress ticket |
+| POST   | `/api/tickets/:ticketId/release`              | idempotently unclaim an in-progress/todo ticket |
 | POST   | `/api/auth/login`                             | `{ email, password }` |
 | POST   | `/api/auth/logout`                            | —            |
 | GET    | `/api/db`                                     | —            |
@@ -205,6 +207,7 @@ pjm ticket get <id>
 pjm ticket update <id> [--title "…"] [--status in_progress] [--priority p0]
 pjm ticket transition <id> --status in_progress
 pjm ticket take <id>            # shortcut: → in_progress
+pjm ticket release <id>         # shortcut: → todo
 pjm ticket done <id>            # shortcut: → done
 pjm ticket archive <id>
 

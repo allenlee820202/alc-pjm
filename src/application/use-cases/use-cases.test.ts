@@ -5,6 +5,7 @@ import { CreateTicketUseCase } from "./create-ticket";
 import { ListTicketsUseCase } from "./list-tickets";
 import { UpdateTicketUseCase } from "./update-ticket";
 import { TransitionTicketUseCase } from "./transition-ticket";
+import { ReleaseTicketUseCase, TakeTicketUseCase } from "./take-ticket";
 import { ArchiveTicketUseCase, UnarchiveTicketUseCase } from "./archive-ticket";
 import { AddTicketDependencyUseCase } from "./add-ticket-dependency";
 import { RemoveTicketDependencyUseCase } from "./remove-ticket-dependency";
@@ -30,6 +31,8 @@ describe("Use cases", () => {
   let listTickets: ListTicketsUseCase;
   let updateTicket: UpdateTicketUseCase;
   let transitionTicket: TransitionTicketUseCase;
+  let takeTicket: TakeTicketUseCase;
+  let releaseTicket: ReleaseTicketUseCase;
   let archiveTicket: ArchiveTicketUseCase;
   let unarchiveTicket: UnarchiveTicketUseCase;
   let addDep: AddTicketDependencyUseCase;
@@ -49,6 +52,8 @@ describe("Use cases", () => {
     listTickets = new ListTicketsUseCase(tickets);
     updateTicket = new UpdateTicketUseCase(tickets, epics);
     transitionTicket = new TransitionTicketUseCase(tickets);
+    takeTicket = new TakeTicketUseCase(tickets);
+    releaseTicket = new ReleaseTicketUseCase(tickets);
     archiveTicket = new ArchiveTicketUseCase(tickets);
     unarchiveTicket = new UnarchiveTicketUseCase(tickets);
     addDep = new AddTicketDependencyUseCase(tickets, ticketDeps);
@@ -326,6 +331,73 @@ describe("Use cases", () => {
       await expect(
         transitionTicket.execute({ ticketId: t.id.value, status: "todo" }),
       ).rejects.toThrow(ValidationError);
+    });
+  });
+
+  describe("TakeTicketUseCase", () => {
+    it("moves todo tickets to in_progress and treats in_progress as success", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+
+      const taken = await takeTicket.execute({ ticketId: t.id.value });
+      expect(taken.status.value).toBe("in_progress");
+
+      const takenAgain = await takeTicket.execute({ ticketId: t.id.value });
+      expect(takenAgain.status.value).toBe("in_progress");
+    });
+
+    it("does not take done tickets", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+      await transitionTicket.execute({ ticketId: t.id.value, status: "done" });
+
+      await expect(takeTicket.execute({ ticketId: t.id.value })).rejects.toThrow(
+        ValidationError,
+      );
+    });
+  });
+
+  describe("ReleaseTicketUseCase", () => {
+    it("moves in_progress tickets to todo and treats todo as success", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+
+      const alreadyTodo = await releaseTicket.execute({ ticketId: t.id.value });
+      expect(alreadyTodo.status.value).toBe("todo");
+
+      await takeTicket.execute({ ticketId: t.id.value });
+      const released = await releaseTicket.execute({ ticketId: t.id.value });
+      expect(released.status.value).toBe("todo");
+    });
+
+    it("does not release done tickets", async () => {
+      const p = await createProject.execute({ key: "PJM", name: "P" });
+      const t = await createTicket.execute({
+        projectId: p.id.value,
+        type: "task",
+        title: "x",
+        priority: "p2",
+      });
+      await transitionTicket.execute({ ticketId: t.id.value, status: "done" });
+
+      await expect(releaseTicket.execute({ ticketId: t.id.value })).rejects.toThrow(
+        ValidationError,
+      );
     });
   });
 

@@ -84,6 +84,7 @@ pnpm pjm ticket get <id>
 pnpm pjm ticket update <id> [--title "..."] [--status in_progress] [--priority p0]
 pnpm pjm ticket transition <id> --status in_progress
 pnpm pjm ticket take <id>            # shortcut: → in_progress
+pnpm pjm ticket release <id>         # shortcut: → todo
 pnpm pjm ticket done <id>            # shortcut: → done
 pnpm pjm ticket archive <id>
 

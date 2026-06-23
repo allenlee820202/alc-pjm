@@ -30,6 +30,10 @@ import { ListTicketsUseCase } from "@/application/use-cases/list-tickets";
 import { UpdateTicketUseCase } from "@/application/use-cases/update-ticket";
 import { TransitionTicketUseCase } from "@/application/use-cases/transition-ticket";
 import {
+  ReleaseTicketUseCase,
+  TakeTicketUseCase,
+} from "@/application/use-cases/take-ticket";
+import {
   ArchiveTicketUseCase,
   UnarchiveTicketUseCase,
 } from "@/application/use-cases/archive-ticket";
@@ -54,6 +58,8 @@ interface Container {
   listTickets: ListTicketsUseCase;
   updateTicket: UpdateTicketUseCase;
   transitionTicket: TransitionTicketUseCase;
+  takeTicket: TakeTicketUseCase;
+  releaseTicket: ReleaseTicketUseCase;
   archiveTicket: ArchiveTicketUseCase;
   unarchiveTicket: UnarchiveTicketUseCase;
   addTicketDependency: AddTicketDependencyUseCase;
@@ -143,6 +149,8 @@ function buildContainer(): Container {
     listTickets: new ListTicketsUseCase(tickets),
     updateTicket: new UpdateTicketUseCase(tickets, epics),
     transitionTicket: new TransitionTicketUseCase(tickets),
+    takeTicket: new TakeTicketUseCase(tickets),
+    releaseTicket: new ReleaseTicketUseCase(tickets),
     archiveTicket: new ArchiveTicketUseCase(tickets),
     unarchiveTicket: new UnarchiveTicketUseCase(tickets),
     addTicketDependency: new AddTicketDependencyUseCase(tickets, ticketDependencies),
