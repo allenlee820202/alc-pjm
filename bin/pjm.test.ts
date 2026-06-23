@@ -92,6 +92,40 @@ describe("pjm ticket mine", () => {
   });
 });
 
+describe("pjm ticket take/release", () => {
+  it("takes tickets through the dedicated take endpoint", async () => {
+    await startServer((req, res) => {
+      if (handleLogin(req, res)) return;
+      if (req.method === "POST" && req.url === "/api/tickets/t1/take") {
+        json(res, { ticket: { id: "t1", status: "in_progress" } });
+        return;
+      }
+      notFound(res);
+    });
+
+    const { stdout } = await runPjm("ticket", "take", "t1");
+
+    expect(JSON.parse(stdout)).toEqual({ id: "t1", status: "in_progress" });
+    expect(requests).toContain("POST /api/tickets/t1/take");
+  });
+
+  it("releases tickets through the dedicated release endpoint", async () => {
+    await startServer((req, res) => {
+      if (handleLogin(req, res)) return;
+      if (req.method === "POST" && req.url === "/api/tickets/t1/release") {
+        json(res, { ticket: { id: "t1", status: "todo" } });
+        return;
+      }
+      notFound(res);
+    });
+
+    const { stdout } = await runPjm("ticket", "release", "t1");
+
+    expect(JSON.parse(stdout)).toEqual({ id: "t1", status: "todo" });
+    expect(requests).toContain("POST /api/tickets/t1/release");
+  });
+});
+
 async function startServer(
   handler: (req: IncomingMessage, res: ServerResponse) => void,
 ): Promise<void> {

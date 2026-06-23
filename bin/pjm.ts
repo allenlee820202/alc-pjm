@@ -232,10 +232,14 @@ async function cmdTicketTransition(
 }
 
 async function cmdTicketTake(client: Client, id: string): Promise<unknown> {
-  const result = await client.request("PATCH", `/api/tickets/${id}`, {
-    status: "in_progress",
-  });
+  const result = await client.request("POST", `/api/tickets/${id}/take`);
   if (!result.ok) printError("Failed to take ticket", result.data);
+  return (result.data as { ticket: unknown }).ticket;
+}
+
+async function cmdTicketRelease(client: Client, id: string): Promise<unknown> {
+  const result = await client.request("POST", `/api/tickets/${id}/release`);
+  if (!result.ok) printError("Failed to release ticket", result.data);
   return (result.data as { ticket: unknown }).ticket;
 }
 
@@ -424,6 +428,12 @@ async function main(): Promise<void> {
           result = await cmdTicketTake(client, id);
           break;
         }
+        case "release": {
+          const id = positionals[2];
+          if (!id) printError("Usage: pjm ticket release <id>");
+          result = await cmdTicketRelease(client, id);
+          break;
+        }
         case "done": {
           const id = positionals[2];
           if (!id) printError("Usage: pjm ticket done <id>");
@@ -465,7 +475,7 @@ async function main(): Promise<void> {
         }
         default:
           printError(
-            "Usage: pjm ticket <list|create|get|update|transition|take|done|archive|next|mine|dep>",
+            "Usage: pjm ticket <list|create|get|update|transition|take|release|done|archive|next|mine|dep>",
           );
       }
       break;
