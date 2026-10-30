@@ -3,10 +3,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
- * Schema for the local SQLite store. Kept in a single SQL string applied via
- * `db.exec(...)` because the schema is small and we don't yet need versioned
- * migrations. When we add the second migration, switch to a numbered list and
- * record applied versions in a `_migrations` table.
+ * Base schema for pre-migration stores. Additive migrations below are recorded
+ * in `_migrations`; schema setup and pending migrations run in one transaction.
  *
  * Notes:
  *  - Timestamps are stored as ISO-8601 strings to match `*Snapshot` shapes
@@ -62,6 +60,46 @@ CREATE INDEX IF NOT EXISTS idx_ticket_deps_ticket ON ticket_dependencies(ticket_
 CREATE INDEX IF NOT EXISTS idx_ticket_deps_depends_on ON ticket_dependencies(depends_on_ticket_id);
 `;
 
+const MIGRATIONS = [{
+  version: 1,
+  sql: `
+    ALTER TABLE tickets ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE tickets ADD COLUMN annotations TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE tickets ADD COLUMN origin TEXT DEFAULT NULL;
+    CREATE TRIGGER tickets_origin_immutable
+      BEFORE UPDATE OF origin ON tickets
+      WHEN NEW.origin IS NOT OLD.origin
+      BEGIN SELECT RAISE(ABORT, 'Origin is immutable'); END;
+  `,
+}, {
+  version: 2,
+  sql: `
+    ALTER TABLE tickets ADD COLUMN row_version INTEGER NOT NULL DEFAULT 0;
+    -- Legacy column-list UPDATE writers must invalidate detached readers too.
+    CREATE TRIGGER tickets_bump_row_version
+      AFTER UPDATE ON tickets
+      WHEN NEW.row_version = OLD.row_version
+      BEGIN
+        UPDATE tickets SET row_version = OLD.row_version + 1 WHERE id = NEW.id;
+      END;
+  `,
+}];
+
+/** Exported for isolated migration tests; callers normally use openDatabase. */
+export function migrateDatabase(db: DatabaseType): void {
+  db.transaction(() => {
+    db.exec(SCHEMA);
+    db.exec(`CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY)`);
+    const applied = db.prepare<[number]>("SELECT version FROM _migrations WHERE version = ?");
+    const record = db.prepare<[number]>("INSERT INTO _migrations (version) VALUES (?)");
+    for (const migration of MIGRATIONS) {
+      if (applied.get(migration.version)) continue;
+      db.exec(migration.sql);
+      record.run(migration.version);
+    }
+  }).immediate();
+}
+
 /** Open a SQLite database file (creating the directory if needed) and apply schema. */
 export function openDatabase(filePath: string): DatabaseType {
   // ":memory:" is a valid SQLite path that does not need a directory.
@@ -69,10 +107,15 @@ export function openDatabase(filePath: string): DatabaseType {
     mkdirSync(dirname(filePath), { recursive: true });
   }
   const db = new Database(filePath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(SCHEMA);
-  return db;
+  try {
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    migrateDatabase(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export type { DatabaseType };

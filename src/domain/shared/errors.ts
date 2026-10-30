@@ -19,6 +19,14 @@ export class ValidationError extends DomainError {
   }
 }
 
+/** A detached aggregate was superseded by another writer; reload before retrying. */
+export class ConflictError extends DomainError {
+  constructor(message: string) {
+    super("CONFLICT", message);
+    this.name = "ConflictError";
+  }
+}
+
 export class NotFoundError extends DomainError {
   constructor(entity: string, id: string) {
     super("NOT_FOUND", `${entity} with id "${id}" not found`);

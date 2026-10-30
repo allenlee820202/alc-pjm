@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getContainer } from "@/infrastructure/container";
 import { requireUser, toErrorResponse } from "@/presentation/api/helpers";
+import { normalizeTicketMetadata } from "@/domain/ticket/ticket-metadata";
 
 const createSchema = z.object({
   projectId: z.string().uuid(),
@@ -11,6 +12,10 @@ const createSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(10_000).optional(),
   priority: z.enum(["p0", "p1", "p2"]),
+  // Preserve raw objects until domain validation, including forbidden annotation keys.
+  tags: z.unknown().optional(),
+  annotations: z.unknown().optional(),
+  origin: z.unknown().optional(),
 });
 
 const listSchema = z.object({
@@ -19,6 +24,11 @@ const listSchema = z.object({
   status: z.enum(["todo", "in_progress", "done"]).optional(),
   priority: z.enum(["p0", "p1", "p2"]).optional(),
   type: z.enum(["story", "task", "subtask", "bug"]).optional(),
+  tag: z.string().optional(),
+  annotationKey: z.string().optional(),
+  annotationValue: z.string().optional(),
+  automationId: z.string().optional(),
+  includeArchived: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -46,6 +56,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ tickets: snapshots });
   } catch (e) {
+    if (e instanceof z.ZodError) {
+      return NextResponse.json({ error: "VALIDATION_ERROR", issues: e.issues }, { status: 400 });
+    }
     return toErrorResponse(e);
   }
 }
@@ -55,7 +68,8 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return auth.res;
   try {
     const body = createSchema.parse(await req.json());
-    const ticket = await getContainer().createTicket.execute(body);
+    const metadata = normalizeTicketMetadata(body);
+    const ticket = await getContainer().createTicket.execute({ ...body, ...metadata });
     return NextResponse.json({ ticket: ticket.toSnapshot() }, { status: 201 });
   } catch (e) {
     if (e instanceof z.ZodError) {

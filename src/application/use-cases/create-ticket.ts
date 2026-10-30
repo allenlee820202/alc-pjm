@@ -7,7 +7,9 @@ import type { ProjectRepository } from "../ports/project-repository";
 import type { EpicRepository } from "../ports/epic-repository";
 import type { TicketRepository } from "../ports/ticket-repository";
 
-export interface CreateTicketInput {
+import type { TicketMetadata } from "@/domain/ticket/ticket-metadata";
+
+export interface CreateTicketInput extends Partial<TicketMetadata> {
   projectId: string;
   epicId?: string | null;
   parentTicketId?: string | null;
@@ -68,6 +70,9 @@ export class CreateTicketUseCase {
       title: input.title,
       description: input.description,
       priority: Priority.of(input.priority),
+      tags: input.tags,
+      annotations: input.annotations,
+      origin: input.origin,
     });
 
     await this.tickets.save(ticket);

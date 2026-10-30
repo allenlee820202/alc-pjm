@@ -116,15 +116,16 @@ function buildContainer(): Container {
     ticketQueue = new InMemoryTicketQueueRepository(tickets, ticketDependencies);
   }
 
-  let auth: AuthService = new StubAuthService();
-  if (authMode === "supabase") {
-    import("@/infrastructure/auth/supabase-auth-service").then((mod) => {
-      auth = new mod.SupabaseAuthService();
-      if (globalThis.__ALC_PJM_CONTAINER__) {
-        globalThis.__ALC_PJM_CONTAINER__.auth = auth;
-      }
-    });
-  }
+  // Never temporarily expose stub auth while the configured Supabase adapter loads.
+  // Each operation awaits the selected adapter, and import failure stays fail-closed.
+  let supabaseAuth: Promise<AuthService> | undefined;
+  const loadSupabaseAuth = () => supabaseAuth ??= import("@/infrastructure/auth/supabase-auth-service")
+    .then((mod) => new mod.SupabaseAuthService());
+  const auth: AuthService = authMode === "supabase" ? {
+    signIn: async (email, password) => (await loadSupabaseAuth()).signIn(email, password),
+    signOut: async () => (await loadSupabaseAuth()).signOut(),
+    getCurrentUser: async () => (await loadSupabaseAuth()).getCurrentUser(),
+  } : new StubAuthService();
 
   // Seed a demo project so the UI is not empty on first run.
   void (async () => {

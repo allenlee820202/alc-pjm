@@ -5,7 +5,9 @@ import type { TicketStatusValue } from "@/domain/ticket/ticket-status";
 import type { PriorityValue } from "@/domain/ticket/priority";
 import type { TicketTypeValue } from "@/domain/ticket/ticket-type";
 
-export interface ListTicketsInput {
+import { validateTicketMetadataFilters, type TicketMetadataFilters } from "@/domain/ticket/ticket-metadata";
+
+export interface ListTicketsInput extends TicketMetadataFilters {
   projectId?: string;
   epicId?: string;
   status?: TicketStatusValue;
@@ -18,7 +20,13 @@ export class ListTicketsUseCase {
   constructor(private readonly tickets: TicketRepository) {}
 
   async execute(input: ListTicketsInput = {}): Promise<Ticket[]> {
-    const filters: TicketListFilters = {};
+    validateTicketMetadataFilters(input);
+    const filters: TicketListFilters = {
+      tag: input.tag,
+      annotationKey: input.annotationKey,
+      annotationValue: input.annotationValue,
+      automationId: input.automationId,
+    };
     if (input.projectId) filters.projectId = Id.of<"Project">(input.projectId);
     if (input.epicId) filters.epicId = Id.of<"Epic">(input.epicId);
     if (input.status) filters.status = input.status;

@@ -2,15 +2,22 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getContainer } from "@/infrastructure/container";
 import { Id } from "@/domain/shared/id";
+import { ConflictError } from "@/domain/shared/errors";
 import { DbHeader } from "@/presentation/components/db-header";
+import { TicketMetadataEditor } from "@/presentation/components/ticket-metadata-editor";
+import { TicketMetadataDisplay } from "@/presentation/components/ticket-metadata-display";
+import { ticketMetadataFromForm } from "@/presentation/ticket-metadata-form";
+import { requirePageUser } from "@/presentation/page-auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function EditTicketPage({
-  params,
+  params, searchParams,
 }: {
   params: Promise<{ projectId: string; ticketId: string }>;
+  searchParams?: Promise<{ conflict?: string }>;
 }) {
+  await requirePageUser();
   const { projectId, ticketId } = await params;
   const c = getContainer();
 
@@ -20,19 +27,31 @@ export default async function EditTicketPage({
 
   const epics = await c.listEpics.execute({ projectId });
   const snap = ticket.toSnapshot();
+  const renderedVersion = ticket.persistenceVersion;
+  const showConflict = (await searchParams)?.conflict === "1";
 
   async function save(formData: FormData) {
     "use server";
+    await requirePageUser();
     const c = getContainer();
     const epicValue = String(formData.get("epicId") ?? "");
-    await c.updateTicket.execute({
-      ticketId,
-      title: String(formData.get("title") ?? ""),
-      description: String(formData.get("description") ?? ""),
-      priority: formData.get("priority") as "p0" | "p1" | "p2",
-      // empty string in select means "clear epic"
-      epicId: epicValue === "" ? null : epicValue,
-    });
+    try {
+      await c.updateTicket.execute({
+        ticketId,
+        expectedVersion: renderedVersion,
+        title: String(formData.get("title") ?? ""),
+        description: String(formData.get("description") ?? ""),
+        priority: formData.get("priority") as "p0" | "p1" | "p2",
+        // empty string in select means "clear epic"
+        epicId: epicValue === "" ? null : epicValue,
+        ...ticketMetadataFromForm(formData),
+      });
+    } catch (error) {
+      if (error instanceof ConflictError) {
+        redirect(`/projects/${projectId}/tickets/${ticketId}/edit?conflict=1`);
+      }
+      throw error;
+    }
     redirect(`/projects/${projectId}`);
   }
 
@@ -48,7 +67,11 @@ export default async function EditTicketPage({
         <DbHeader />
       </div>
       <h1 className="mb-4 text-2xl font-bold">Edit ticket</h1>
-      <form action={save} className="space-y-4 rounded-lg border bg-white p-4 shadow-sm">
+      {showConflict && <p role="alert" data-testid="edit-conflict" className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+        Ticket changed since this form was opened. Your changes were not saved. Review the latest values and retry.
+      </p>}
+      <TicketMetadataDisplay tags={snap.tags} annotations={snap.annotations} origin={snap.origin} />
+      <form key={renderedVersion ?? "unpersisted"} action={save} className="space-y-4 rounded-lg border bg-white p-4 shadow-sm">
         <div>
           <label className="mb-1 block text-sm font-medium" htmlFor="title">
             Title
@@ -112,6 +135,7 @@ export default async function EditTicketPage({
             </select>
           </div>
         </div>
+        <TicketMetadataEditor tags={snap.tags} annotations={snap.annotations} origin={snap.origin} />
         <div className="flex items-center gap-3">
           <button
             type="submit"

@@ -120,10 +120,44 @@ function parseLimit(flags: Flags): number | undefined {
   return limit;
 }
 
+/** Only explicit flags are sent, keeping legacy empty-metadata calls unchanged. */
+function metadataBody(flags: Flags, create: boolean): Record<string, unknown> {
+  if (!create && flags["origin-json"] !== undefined) printError("--origin-json is create-only; origin is immutable");
+  const body: Record<string, unknown> = {};
+  for (const field of create ? ["tags", "annotations", "origin"] : ["tags", "annotations"]) {
+    const raw = flags[`${field}-json`];
+    if (raw === undefined) continue;
+    if (typeof raw !== "string") printError(`--${field}-json requires JSON`);
+    try {
+      body[field] = JSON.parse(raw);
+    } catch {
+      printError(`--${field}-json must contain valid JSON`);
+    }
+    const value = body[field];
+    if (field === "tags" && (!Array.isArray(value) || value.some((tag) => typeof tag !== "string"))) {
+      printError("--tags-json requires a JSON array of strings");
+    }
+    if ((field === "annotations" || field === "origin") &&
+        (value === null ? field !== "origin" : typeof value !== "object" || Array.isArray(value))) {
+      printError(`--${field}-json requires a JSON object${field === "origin" ? " or null" : ""}`);
+    }
+    if (field === "annotations" && Object.values(value as object).some((v) => typeof v !== "string")) {
+      printError("--annotations-json requires string values");
+    }
+  }
+  return body;
+}
+
 // ── Command handlers ────────────────────────────────────────────────
 
 type Client = ReturnType<typeof createClient>;
 type Flags = Record<string, string | boolean>;
+
+async function cmdCapabilities(client: Client): Promise<unknown> {
+  const result = await client.request("GET", "/api/capabilities");
+  if (!result.ok) printError("Failed to get capabilities", result.data);
+  return result.data;
+}
 
 async function cmdProjectList(client: Client): Promise<unknown> {
   const result = await client.request("GET", "/api/projects");
@@ -173,6 +207,17 @@ async function cmdTicketList(client: Client, flags: Flags): Promise<unknown> {
   if (typeof flags["status"] === "string") params.set("status", flags["status"]);
   if (typeof flags["priority"] === "string") params.set("priority", flags["priority"]);
   if (typeof flags["type"] === "string") params.set("type", flags["type"]);
+  for (const [flag, param] of [["tag", "tag"], ["annotation-key", "annotationKey"],
+    ["annotation-value", "annotationValue"], ["automation-id", "automationId"]]) {
+    const value = flags[flag];
+    if (value !== undefined) {
+      if (typeof value !== "string") printError(`--${flag} requires a value`);
+      params.set(param, value);
+    }
+  }
+  if (params.has("annotationKey") !== params.has("annotationValue")) {
+    printError("--annotation-key and --annotation-value must be supplied together");
+  }
   const qs = params.toString();
   const result = await client.request("GET", `/api/tickets${qs ? "?" + qs : ""}`);
   if (!result.ok) printError("Failed to list tickets", result.data);
@@ -188,8 +233,9 @@ async function cmdTicketCreate(client: Client, flags: Flags): Promise<unknown> {
   if (!type || typeof type !== "string") printError("--type is required");
   if (!title || typeof title !== "string") printError("--title is required");
   if (!priority || typeof priority !== "string") printError("--priority is required");
+  const metadata = metadataBody(flags, true);
   const projectId = await resolveProjectId(client, project);
-  const body: Record<string, unknown> = { projectId, type, title, priority };
+  const body: Record<string, unknown> = { projectId, type, title, priority, ...metadata };
   if (typeof flags["epic"] === "string") body.epicId = flags["epic"];
   if (typeof flags["description"] === "string") body.description = flags["description"];
   const result = await client.request("POST", "/api/tickets", body);
@@ -208,7 +254,7 @@ async function cmdTicketUpdate(
   id: string,
   flags: Flags,
 ): Promise<unknown> {
-  const body: Record<string, unknown> = {};
+  const body: Record<string, unknown> = metadataBody(flags, false);
   if (typeof flags["title"] === "string") body.title = flags["title"];
   if (typeof flags["status"] === "string") body.status = flags["status"];
   if (typeof flags["priority"] === "string") body.priority = flags["priority"];
@@ -354,6 +400,9 @@ async function main(): Promise<void> {
 
   const resource = positionals[0];
   const action = positionals[1];
+  if (flags["origin-json"] !== undefined && (resource !== "ticket" || action !== "create")) {
+    printError("--origin-json is create-only; origin is immutable");
+  }
 
   // Special commands
   if (resource === "init") {
@@ -370,6 +419,10 @@ async function main(): Promise<void> {
   let result: unknown;
 
   switch (resource) {
+    case "capabilities":
+      result = await cmdCapabilities(client);
+      break;
+
     case "project":
       switch (action) {
         case "list":
@@ -483,7 +536,7 @@ async function main(): Promise<void> {
 
     default:
       printError(
-        "Usage: pjm <init|project|epic|ticket> [action] [flags]",
+        "Usage: pjm <init|capabilities|project|epic|ticket> [action] [flags]",
         resource ? `Unknown resource: ${resource}` : "No command given",
       );
   }
