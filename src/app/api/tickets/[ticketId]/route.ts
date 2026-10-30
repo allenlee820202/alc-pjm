@@ -4,9 +4,8 @@ import { getContainer } from "@/infrastructure/container";
 import { requireUser, toErrorResponse } from "@/presentation/api/helpers";
 
 /**
- * Patch payload accepts any subset of mutable fields. `status` triggers a
- * workflow transition (validated by the domain), other fields go through the
- * UpdateTicket use case. `epicId: null` clears the epic.
+ * Patch validates all mutable fields on one aggregate, then saves once with
+ * optimistic conflict detection. `epicId: null` clears the epic.
  */
 const patchSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -15,6 +14,10 @@ const patchSchema = z.object({
   epicId: z.string().uuid().nullable().optional(),
   status: z.enum(["todo", "in_progress", "done"]).optional(),
   archived: z.boolean().optional(),
+  tags: z.unknown().optional(),
+  annotations: z.unknown().optional(),
+  // Unlike other unknown legacy fields, provenance must never be silently stripped.
+  origin: z.never().optional(),
 });
 
 export async function GET(
@@ -50,38 +53,17 @@ export async function PATCH(
     const { ticketId } = await params;
     const body = patchSchema.parse(await req.json());
     const c = getContainer();
-
-    if (body.archived === true) {
-      await c.archiveTicket.execute({ ticketId });
-    } else if (body.archived === false) {
-      await c.unarchiveTicket.execute({ ticketId });
-    }
-
-    if (body.status) {
-      await c.transitionTicket.execute({ ticketId, status: body.status });
-    }
-
-    const hasFieldEdits =
-      body.title !== undefined ||
-      body.description !== undefined ||
-      body.priority !== undefined ||
-      body.epicId !== undefined;
-    if (hasFieldEdits) {
-      await c.updateTicket.execute({
-        ticketId,
-        title: body.title,
-        description: body.description,
-        priority: body.priority,
-        epicId: body.epicId,
-      });
-    }
-
-    const final = await c.tickets.findById(
-      (await import("@/domain/shared/id")).Id.of<"Ticket">(ticketId),
-    );
-    if (!final) {
-      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
-    }
+    const final = await c.updateTicket.execute({
+      ticketId,
+      title: body.title,
+      description: body.description,
+      priority: body.priority,
+      epicId: body.epicId,
+      tags: body.tags,
+      annotations: body.annotations,
+      status: body.status,
+      archived: body.archived,
+    });
     const snapshot = final.toSnapshot();
     const deps = await c.ticketDependencies.listByTicket(ticketId);
     snapshot.dependencyIds = deps.map((d) => d.dependsOnTicketId);

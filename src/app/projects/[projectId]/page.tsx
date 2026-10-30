@@ -6,6 +6,11 @@ import { ProjectSwitcher } from "@/presentation/components/project-switcher";
 import { StatusSelect } from "@/presentation/components/status-select";
 import { ArchiveButton } from "@/presentation/components/archive-button";
 import { DbHeader } from "@/presentation/components/db-header";
+import { TicketMetadataEditor } from "@/presentation/components/ticket-metadata-editor";
+import { TicketMetadataDisplay } from "@/presentation/components/ticket-metadata-display";
+import { ticketMetadataFromForm } from "@/presentation/ticket-metadata-form";
+import { validateTicketMetadataFilters } from "@/domain/ticket/ticket-metadata";
+import { requirePageUser } from "@/presentation/page-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +34,19 @@ const COLUMNS: Array<{ key: "todo" | "in_progress" | "done"; label: string }> = 
 ];
 
 export default async function ProjectPage({
-  params,
+  params, searchParams,
 }: {
   params: Promise<{ projectId: string }>;
+  searchParams: Promise<{ tag?: string; automationId?: string }>;
 }) {
+  await requirePageUser();
   const { projectId } = await params;
+  const query = await searchParams;
+  const tag = typeof query.tag === "string" && query.tag !== "" ? query.tag : undefined;
+  const automationId = typeof query.automationId === "string" && query.automationId !== "" ? query.automationId : undefined;
+  let filterError = "";
+  try { validateTicketMetadataFilters({ tag, automationId }); }
+  catch (e) { filterError = e instanceof Error ? e.message : "Invalid filters"; }
   const c = getContainer();
 
   let project;
@@ -50,8 +63,13 @@ export default async function ProjectPage({
     c.listProjects.execute(),
   ]);
 
+  // Keep the parent selector unfiltered while applying exact-match board filters.
+  const visibleTickets = filterError ? [] : tag !== undefined || automationId !== undefined
+    ? await c.listTickets.execute({ projectId, tag, automationId }) : allTickets;
+
   async function createEpic(formData: FormData) {
     "use server";
+    await requirePageUser();
     const c = getContainer();
     await c.createEpic.execute({
       projectId,
@@ -63,6 +81,7 @@ export default async function ProjectPage({
 
   async function createTicket(formData: FormData) {
     "use server";
+    await requirePageUser();
     const c = getContainer();
     const epicIdRaw = String(formData.get("epicId") ?? "");
     const parentIdRaw = String(formData.get("parentTicketId") ?? "");
@@ -74,12 +93,14 @@ export default async function ProjectPage({
       title: String(formData.get("title") ?? ""),
       description: String(formData.get("description") ?? ""),
       priority: String(formData.get("priority") ?? "p2"),
+      ...ticketMetadataFromForm(formData, "create"),
     });
     redirect(`/projects/${projectId}`);
   }
 
   async function logout() {
     "use server";
+    await requirePageUser();
     await getContainer().auth.signOut();
     redirect("/login");
   }
@@ -89,7 +110,7 @@ export default async function ProjectPage({
     in_progress: [] as typeof allTickets,
     done: [] as typeof allTickets,
   };
-  for (const t of allTickets) {
+  for (const t of visibleTickets) {
     ticketsByStatus[t.status.value].push(t);
   }
 
@@ -204,6 +225,7 @@ export default async function ProjectPage({
                   </option>
                 ))}
             </select>
+            <TicketMetadataEditor />
             <button
               type="submit"
               data-testid="create-ticket"
@@ -236,9 +258,22 @@ export default async function ProjectPage({
           </ul>
         )}
 
-        <h2 className="mb-3 text-lg font-semibold">Board ({allTickets.length})</h2>
-        {allTickets.length === 0 ? (
-          <p className="text-sm text-slate-500">No tickets yet. Create one above.</p>
+        <h2 className="mb-3 text-lg font-semibold">Board ({visibleTickets.length})</h2>
+        <form method="get" className="mb-4 flex flex-wrap items-end gap-2" aria-label="Board filters">
+          <label className="text-sm">Tag
+            <input name="tag" data-testid="filter-tag" defaultValue={tag} maxLength={64}
+              className="ml-2 rounded border px-2 py-1" />
+          </label>
+          <label className="text-sm">Automation ID
+            <input name="automationId" data-testid="filter-automation-id" defaultValue={automationId} maxLength={128}
+              className="ml-2 rounded border px-2 py-1" />
+          </label>
+          <button type="submit" data-testid="apply-filters" className="rounded border px-3 py-1 text-sm">Filter</button>
+          <Link href={`/projects/${projectId}`} className="text-sm text-blue-600">Clear filters</Link>
+        </form>
+        {filterError && <p role="alert" className="text-sm text-red-700">{filterError}</p>}
+        {visibleTickets.length === 0 ? (
+          <p className="text-sm text-slate-500">No matching tickets. Create one above or clear filters.</p>
         ) : (
           <div className="grid gap-4 md:grid-cols-3" data-testid="kanban">
             {COLUMNS.map((col) => (
@@ -282,6 +317,7 @@ export default async function ProjectPage({
                           )}
                         </div>
                         <div className="mb-2 font-medium">{s.title}</div>
+                        <TicketMetadataDisplay tags={s.tags} annotations={s.annotations} origin={s.origin} />
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 text-xs">
                             <Link

@@ -1,4 +1,5 @@
 import { Id } from "../shared/id";
+import { normalizeTicketMetadata, type TicketMetadata, type AutomationOrigin } from "./ticket-metadata";
 import { ValidationError } from "../shared/errors";
 import { Priority, type PriorityValue } from "./priority";
 import { TicketType, type TicketTypeValue } from "./ticket-type";
@@ -10,7 +11,7 @@ export type TicketId = Id<"Ticket">;
 
 const TITLE_MAX = 200;
 
-export interface TicketSnapshot {
+export interface TicketSnapshot extends TicketMetadata {
   id: string;
   projectId: string;
   epicId: string | null;
@@ -28,7 +29,7 @@ export interface TicketSnapshot {
   dependencyIds: string[];
 }
 
-export interface CreateTicketProps {
+export interface CreateTicketProps extends Partial<TicketMetadata> {
   id?: TicketId;
   projectId: ProjectId;
   epicId?: EpicId | null;
@@ -63,6 +64,8 @@ export class Ticket {
     private _archivedAt: Date | null,
     public readonly createdAt: Date,
     private _updatedAt: Date,
+    private _metadata: TicketMetadata,
+    private _persistenceVersion: number | null = null,
   ) {}
 
   static create(props: CreateTicketProps): Ticket {
@@ -111,6 +114,7 @@ export class Ticket {
       null,
       props.createdAt ?? now,
       props.updatedAt ?? now,
+      normalizeTicketMetadata(props),
     );
   }
 
@@ -137,6 +141,38 @@ export class Ticket {
   }
   get archivedAt(): Date | null {
     return this._archivedAt;
+  }
+
+  /** Infrastructure-only concurrency token; deliberately excluded from the wire snapshot. */
+  get persistenceVersion(): number | null {
+    return this._persistenceVersion;
+  }
+
+  /** @internal Called only after a successful repository commit. */
+  recordPersistenceVersion(version: number): void {
+    this._persistenceVersion = version;
+  }
+
+  get tags(): string[] {
+    return [...this._metadata.tags];
+  }
+  get annotations(): Record<string, string> {
+    return { ...this._metadata.annotations };
+  }
+  get origin(): AutomationOrigin | null {
+    return this._metadata.origin ? { ...this._metadata.origin } : null;
+  }
+
+  /** Replace supplied mutable metadata; creation provenance is intentionally not editable. */
+  replaceMetadata(input: { tags?: string[]; annotations?: Record<string, string> }): void {
+    this.ensureNotArchived("edit");
+    if (Object.hasOwn(input, "origin")) throw new ValidationError("Origin is immutable");
+    this._metadata = normalizeTicketMetadata({
+      tags: input.tags === undefined ? this.tags : input.tags,
+      annotations: input.annotations === undefined ? this.annotations : input.annotations,
+      origin: this.origin,
+    });
+    this.touch();
   }
 
   private ensureNotArchived(action: string): void {
@@ -212,10 +248,17 @@ export class Ticket {
       createdAt: this.createdAt.toISOString(),
       updatedAt: this._updatedAt.toISOString(),
       dependencyIds: [],
+      tags: this.tags,
+      annotations: this.annotations,
+      origin: this.origin,
     };
   }
 
-  static fromSnapshot(s: TicketSnapshot): Ticket {
+  /** Older snapshots omit metadata and hydrate with empty defaults. */
+  static fromSnapshot(
+    s: Omit<TicketSnapshot, keyof TicketMetadata> & Partial<TicketMetadata>,
+    persistenceVersion: number | null = null,
+  ): Ticket {
     return new Ticket(
       Id.of<"Ticket">(s.id),
       Id.of<"Project">(s.projectId),
@@ -229,6 +272,8 @@ export class Ticket {
       s.archivedAt ? new Date(s.archivedAt) : null,
       new Date(s.createdAt),
       new Date(s.updatedAt),
+      normalizeTicketMetadata(s),
+      persistenceVersion,
     );
   }
 

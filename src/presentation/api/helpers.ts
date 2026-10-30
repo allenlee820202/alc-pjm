@@ -4,7 +4,7 @@ import { DomainError } from "@/domain/shared/errors";
 
 export function toErrorResponse(err: unknown): NextResponse {
   if (err instanceof DomainError) {
-    const status = err.code === "NOT_FOUND" ? 404 : 400;
+    const status = err.code === "NOT_FOUND" ? 404 : err.code === "CONFLICT" ? 409 : 400;
     return NextResponse.json({ error: err.code, message: err.message }, { status });
   }
   // eslint-disable-next-line no-console
