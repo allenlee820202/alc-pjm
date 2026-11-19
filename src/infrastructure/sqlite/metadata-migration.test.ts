@@ -70,7 +70,7 @@ describe("additive transactional ticket metadata migration", () => {
     visible.replaceMetadata({tags: ["new"], annotations: {source: "migration-test"}}); await tickets.save(visible);
     db.close(); db = openDatabase(path);
     expect((await new SqliteTicketRepository(db).findById(visible.id))?.tags).toEqual(["new"]);
-    expect(db.prepare("SELECT * FROM _migrations").all()).toEqual([{version: 1}, {version: 2}]);
+    expect(db.prepare("SELECT * FROM _migrations").all()).toEqual([{version: 1}, {version: 2}, {version: 3}]);
     expect(db.pragma("foreign_key_check")).toEqual([]);
   });
 
@@ -122,7 +122,7 @@ describe("additive transactional ticket metadata migration", () => {
       await complete;
     } finally {for (const {child} of children) child.kill();}
     db = openDatabase(path);
-    expect(db.prepare("SELECT * FROM _migrations ORDER BY version").all()).toEqual([{version: 1}, {version: 2}]);
+    expect(db.prepare("SELECT * FROM _migrations ORDER BY version").all()).toEqual([{version: 1}, {version: 2}, {version: 3}]);
     expect(db.prepare("SELECT count(*) AS count FROM tickets").get()).toEqual({count: 2});
   }, 15_000);
 
@@ -161,7 +161,10 @@ describe("additive transactional ticket metadata migration", () => {
     const created = Ticket.fromSnapshot({...template, id: "00000000-0000-4000-8000-000000000005", tags: ["v1"], annotations: {v1: "kept"}, origin});
     await repo.save(created);
     // Reconstruct the released v1-only schema in this disposable file.
-    db.exec("DROP TRIGGER tickets_bump_row_version; ALTER TABLE tickets DROP COLUMN row_version; DELETE FROM _migrations WHERE version = 2;");
+    db.exec(`DROP TRIGGER tickets_active_parent_insert; DROP TRIGGER tickets_active_parent_update;
+      DROP TRIGGER ticket_dependencies_active_insert; DROP TRIGGER ticket_dependencies_active_update;
+      DROP TABLE ticket_maintenance_receipts; DROP INDEX idx_tickets_maintenance; DELETE FROM _migrations WHERE version = 3;
+      DROP TRIGGER tickets_bump_row_version; ALTER TABLE tickets DROP COLUMN row_version; DELETE FROM _migrations WHERE version = 2;`);
     const before = db.prepare("SELECT * FROM tickets ORDER BY id").all();
     db.exec("CREATE TRIGGER tickets_bump_row_version AFTER UPDATE ON tickets BEGIN SELECT 1; END;");
     expect(() => migrateDatabase(db)).toThrow(/trigger.*already exists/i);
@@ -171,7 +174,7 @@ describe("additive transactional ticket metadata migration", () => {
     expect(() => db.prepare("UPDATE tickets SET origin = NULL WHERE id = ?").run(created.id.value)).toThrow(/immutable/);
     db.exec("DROP TRIGGER tickets_bump_row_version");
     migrateDatabase(db);
-    expect(db.prepare("SELECT * FROM _migrations ORDER BY version").all()).toEqual([{version: 1}, {version: 2}]);
+    expect(db.prepare("SELECT * FROM _migrations ORDER BY version").all()).toEqual([{version: 1}, {version: 2}, {version: 3}]);
     const restored = (await repo.findById(created.id))!;
     expect(restored.persistenceVersion).toBe(0);
     expect(restored.toSnapshot()).toEqual(created.toSnapshot());

@@ -96,10 +96,14 @@ export function normalizeTicketMetadata(input: {
 
   const metadata = { tags, annotations, origin };
   // UTF-8 bytes, not JS string length. JSON escapes lone surrogates before this count.
-  const bytes = [...JSON.stringify(metadata)].reduce((total, char) => {
-    const cp = char.codePointAt(0)!;
-    return total + (cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4);
-  }, 0);
+  const serialized = JSON.stringify(metadata);
+  let bytes = 0;
+  // A tight scan avoids a per-character array on authoritative discovery reads.
+  for (let i = 0; i < serialized.length; i++) {
+    const cp = serialized.codePointAt(i)!;
+    bytes += cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
+    if (cp > 0xffff) i++;
+  }
   if (bytes > 16 * 1024) throw new ValidationError("Serialized ticket metadata exceeds 16KiB");
   return metadata;
 }

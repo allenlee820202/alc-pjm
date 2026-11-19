@@ -93,36 +93,23 @@ describe("pjm ticket mine", () => {
 });
 
 describe("pjm ticket take/release", () => {
-  it("takes tickets through the dedicated take endpoint", async () => {
+  it.each([
+    { command: "take", verb: "takes", status: "in_progress" },
+    { command: "release", verb: "releases", status: "todo" },
+  ])("$verb tickets through the dedicated $command endpoint", async ({ command, status }) => {
     await startServer((req, res) => {
       if (handleLogin(req, res)) return;
-      if (req.method === "POST" && req.url === "/api/tickets/t1/take") {
-        json(res, { ticket: { id: "t1", status: "in_progress" } });
+      if (req.method === "POST" && req.url === `/api/tickets/t1/${command}`) {
+        json(res, { ticket: { id: "t1", status } });
         return;
       }
       notFound(res);
     });
 
-    const { stdout } = await runPjm("ticket", "take", "t1");
+    const { stdout } = await runPjm("ticket", command, "t1");
 
-    expect(JSON.parse(stdout)).toEqual({ id: "t1", status: "in_progress" });
-    expect(requests).toContain("POST /api/tickets/t1/take");
-  });
-
-  it("releases tickets through the dedicated release endpoint", async () => {
-    await startServer((req, res) => {
-      if (handleLogin(req, res)) return;
-      if (req.method === "POST" && req.url === "/api/tickets/t1/release") {
-        json(res, { ticket: { id: "t1", status: "todo" } });
-        return;
-      }
-      notFound(res);
-    });
-
-    const { stdout } = await runPjm("ticket", "release", "t1");
-
-    expect(JSON.parse(stdout)).toEqual({ id: "t1", status: "todo" });
-    expect(requests).toContain("POST /api/tickets/t1/release");
+    expect(JSON.parse(stdout)).toEqual({ id: "t1", status });
+    expect(requests).toContain(`POST /api/tickets/t1/${command}`);
   });
 });
 
@@ -199,6 +186,105 @@ describe("pjm ticket metadata flags", () => {
     await echoServer();
     await expect(runPjm("ticket", ...args)).rejects.toMatchObject({code: 1});
     expect(requests.some(r => r.includes("/api/tickets"))).toBe(false);
+  });
+});
+
+describe("pjm read-only ticket discovery", () => {
+  const capability = {ticketDiscovery: {version: 1, annotationFacets: true, exactFilters: true, scopes: ["mine", "all"]}};
+  const origin = {system: "alc-agent", automationId: "native", automationRevision: "rev", runId: "r", approvalId: "a"};
+  const snapshot = {id: "30000000-0000-4000-8000-000000000001", projectId: "30000000-0000-4000-8000-000000000002", epicId: null, parentTicketId: null,
+    type: "task", title: "Équipe deploy", description: "Not searched", priority: "p1", status: "todo", archived: false, archivedAt: null,
+    createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", tags: ["Tag"], annotations: {"literal=key": "", equals: "left=right=tail"}, origin, dependencyIds: []};
+  function response(path: string) {
+    const url = new URL(path, "http://localhost"), params = url.searchParams;
+    const facet = url.pathname.endsWith("annotation-facets");
+    return {version: 1, scope: params.get("scope"), automationId: params.get("automationId"), tag: params.get("tag"), query: params.get("query") ?? "",
+      ...(facet ? {key: params.get("key"), prefix: params.get("prefix") ?? "", items: [{key: params.get("key") ?? "team", value: params.has("key") ? "" : null, count: 2}]} :
+        {annotationKey: params.get("annotationKey"), annotationValue: params.get("annotationValue"), items: [snapshot]}),
+      hasMore: false, asOf: 123456789, coverage: "complete"};
+  }
+  async function discoveryServer(transform: (value: ReturnType<typeof response>) => unknown = value => value, caps: unknown = capability) {
+    await startServer((req, res) => {
+      if (handleLogin(req, res)) return;
+      if (req.url === "/api/capabilities") {json(res, caps); return;}
+      if (req.url?.startsWith("/api/tickets/annotation-facets?") || req.url?.startsWith("/api/tickets/search?")) {json(res, transform(response(req.url))); return;}
+      notFound(res);
+    });
+  }
+
+  it("prints the exact server facets DTO as default single-line JSON and keeps an equals sign inside the key", async () => {
+    await discoveryServer();
+    const {stdout} = await runPjm("ticket", "annotation-facets", "--scope", "all", "--automation-id", "native", "--tag", "Tag", "--query", "éQUIPE", "--key", "literal=key", "--prefix", "", "--limit", "1");
+    const path = requests.find(path => path.startsWith("GET /api/tickets/annotation-facets?"))!.slice(4);
+    expect(Object.fromEntries(new URL(path, baseUrl).searchParams)).toEqual({scope: "all", automationId: "native", tag: "Tag", query: "éQUIPE", key: "literal=key", prefix: "", limit: "1"});
+    expect(JSON.parse(stdout)).toEqual(response(path));
+    expect(stdout.trim().split("\n")).toHaveLength(1);
+    expect(requests).toContain("GET /api/capabilities");
+    expect(requests.filter(path => !path.startsWith("GET ") && path !== "POST /api/auth/login")).toEqual([]);
+  });
+
+  it("uses separate literal annotationKey/annotationValue params, including empty and equals-containing values", async () => {
+    await discoveryServer();
+    const first = await runPjm("ticket", "search", "--scope=mine", "--tag", "Tag", "--automation-id", "native", "--query", "équipe", "--annotation-key=literal=key", "--annotation-value=", "--limit", "1");
+    let path = requests.filter(path => path.startsWith("GET /api/tickets/search?")).at(-1)!.slice(4);
+    expect(JSON.parse(first.stdout)).toEqual(response(path));
+    expect(Object.fromEntries(new URL(path, baseUrl).searchParams)).toMatchObject({annotationKey: "literal=key", annotationValue: ""});
+    const second = await runPjm("ticket", "search", "--scope", "all", "--annotation-key", "equals", "--annotation-value=left=right=tail", "--pretty");
+    path = requests.filter(path => path.startsWith("GET /api/tickets/search?")).at(-1)!.slice(4);
+    expect(JSON.parse(second.stdout)).toEqual(response(path));
+    expect(new URL(path, baseUrl).searchParams.get("annotationValue")).toBe("left=right=tail");
+    expect(requests.some(path => path.startsWith("GET /api/tickets?") || path.includes("/queue") || path.includes(snapshot.id))).toBe(false);
+  });
+
+  it.each([
+    ["search"], ["search", "--scope", "Mine"], ["search", "--scope", "all", "--scope", "mine"],
+    ["search", "--scope=all", "--scope", "all"], ["search", "--scope", "mine", "--tag", "Tag", "--tag", "Tag"],
+    ["search", "--scope", "all", "--unknown", "x"], ["search", "--scope", "all", "--include-archived", "true"],
+    ["search", "--scope", "all", "--status", "done"], ["search", "--scope", "all", "--project", "WEB"],
+    ["search", "--scope", "all", "--annotation-key", "a"], ["search", "--scope", "all", "--annotation-value", ""],
+    ["search", "--scope", "all", "--limit", "101"], ["search", "--scope", "all", "--limit", "1e1"],
+    ["search", "--scope", "all", "--query"], ["search", "--scope", "all", "extra"],
+    ["search", "--scope", "all", "--pretty", "--pretty"], ["search", "--scope", "all", "--format", "json", "--format", "json"],
+    ["annotation-facets", "--scope", "all", "--prefix", "a", "--prefix", "b"],
+    ["annotation-facets", "--scope", "all", "--key", "x", "--key", "x"], ["annotation-facets", "--scope", "all", "--limit", "51"],
+    ["annotation-facets", "--scope", "all", "--annotation-key", "a", "--annotation-value", "b"],
+  ])("rejects invalid/duplicate/unknown options before any HTTP request: %j", async (...args) => {
+    await discoveryServer();
+    await expect(runPjm("ticket", ...args)).rejects.toMatchObject({code: 1, stdout: ""});
+    expect(requests).toEqual([]);
+  });
+
+  it.each([{}, {ticketDiscovery: {...capability.ticketDiscovery, version: 2}}, {ticketDiscovery: {...capability.ticketDiscovery, exactFilters: false}}, {ticketDiscovery: {...capability.ticketDiscovery, scopes: ["mine"]}}])("fails closed on unsupported capabilities, with no fallback read or write: %j", async caps => {
+    await discoveryServer(undefined, caps);
+    await expect(runPjm("ticket", "search", "--scope", "mine")).rejects.toMatchObject({code: 1, stderr: expect.stringContaining("unavailable"), stdout: ""});
+    expect(requests.some(path => path.includes("/api/tickets"))).toBe(false);
+  });
+
+  it.each([
+    {scope: "all"}, {coverage: "snapshot"}, {query: "ignored"}, {tag: "ignored"}, {source: "tasks"}, {asOf: null}, {items: [{key: "team", value: 42, count: 1}]},
+  ])("rejects incorrect echoes/envelopes instead of silently claiming authoritative completeness: %j", async changes => {
+    await discoveryServer(value => ({...value, ...changes}));
+    await expect(runPjm("ticket", "annotation-facets", "--scope", "mine")).rejects.toMatchObject({code: 1, stdout: ""});
+  });
+
+  it.each(["capabilities", "discovery"])("redacts malformed upstream JSON at the %s step", async step => {
+    await startServer((req, res) => {
+      if (handleLogin(req, res)) return;
+      if (step === "discovery" && req.url === "/api/capabilities") {json(res, capability); return;}
+      res.writeHead(200, {"content-type": "application/json"}); res.end("synthetic parser secret is not JSON");
+    });
+    await expect(runPjm("ticket", "search", "--scope", "mine")).rejects.toMatchObject({code: 1, stdout: "", stderr: expect.not.stringContaining("secret")});
+    expect(requests.some(path => path.startsWith("GET /api/tickets?") || path.includes("/queue"))).toBe(false);
+  });
+
+  it("does not expose server parser/DB snippets or fall back when an advertised discovery route fails", async () => {
+    await startServer((req, res) => {
+      if (handleLogin(req, res)) return;
+      if (req.url === "/api/capabilities") {json(res, capability); return;}
+      res.writeHead(500, {"content-type": "application/json"}); res.end(JSON.stringify({message: "parser DB secret synthetic"}));
+    });
+    await expect(runPjm("ticket", "search", "--scope", "mine")).rejects.toMatchObject({code: 1, stdout: "", stderr: expect.not.stringContaining("secret")});
+    expect(requests.some(path => path.startsWith("GET /api/tickets?") || path.includes("/queue"))).toBe(false);
   });
 });
 

@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium",
+    "benchmark:ticket-discovery": "tsx benchmarks/ticket-discovery.ts",
     "pjm": "tsx bin/pjm.ts",
     "pjm-server": "tsx bin/pjm-server.ts"
   },

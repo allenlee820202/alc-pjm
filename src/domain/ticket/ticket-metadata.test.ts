@@ -62,6 +62,16 @@ describe("ticket metadata wire contract", () => {
     expect(() => normalizeTicketMetadata({annotations, origin})).toThrow(/16KiB/);
   });
 
+  it.each(["é", "界", "😀", "\ud800", "\udc00", "e\u0301", "\\", '"'])("keeps exact UTF-8 budgets for Unicode/JSON escapes: %j", unit => {
+    const annotations: Record<string, string> = {unicode: unit.repeat(500), tail: ""};
+    const serializedBytes = () => Buffer.byteLength(JSON.stringify({tags: [], annotations, origin: null}), "utf8");
+    for (let n = 0; serializedBytes() < 16 * 1024 - 2048; n++) annotations["pad" + n] = "x".repeat(1000);
+    annotations.tail = "x".repeat(16 * 1024 - serializedBytes());
+    expect(Buffer.byteLength(JSON.stringify(normalizeTicketMetadata({annotations})), "utf8")).toBe(16 * 1024);
+    annotations.tail += "x";
+    expect(() => normalizeTicketMetadata({annotations})).toThrow(/16KiB/);
+  });
+
   it("requires every origin field and accepts 128-character identifiers", () => {
     for (const key of Object.keys(origin)) {
       const partial = {...origin} as Record<string, unknown>; delete partial[key];

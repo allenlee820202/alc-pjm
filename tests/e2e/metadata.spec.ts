@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 const origin = {system: "alc-agent", automationId: "metadata-e2e", automationRevision: "a".repeat(64), runId: "run-1", approvalId: "approval-1"};
 
@@ -47,7 +47,7 @@ test("metadata capability negotiation is authenticated and exact", async ({reque
   await request.post("/api/auth/login", {data: {email: "demo@example.com", password: "demo1234"}});
   const response = await request.get("/api/capabilities");
   expect(response.status()).toBe(200);
-  expect(await response.json()).toEqual({ticketMetadata: {version: 1, tags: true, annotations: true, origin: true, immutableOrigin: true}});
+  expect(await response.json()).toEqual({ticketMetadata: {version: 1, tags: true, annotations: true, origin: true, immutableOrigin: true}, ticketDiscovery: {version: 1, annotationFacets: true, exactFilters: true, scopes: ["mine", "all"]}, workItemMaintenance: {version: 1, inventory: true, conditionalArchive: true, restore: true, receipts: true}});
 });
 
 test("native stale edit shows a conflict and cannot restore old metadata after an external API patch", async ({page}) => {

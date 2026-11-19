@@ -3,7 +3,12 @@ import type { EpicRepository } from "@/application/ports/epic-repository";
 import type { TicketRepository } from "@/application/ports/ticket-repository";
 import type { TicketDependencyRepository } from "@/application/ports/ticket-dependency-repository";
 import type { TicketQueueRepository } from "@/application/ports/ticket-queue-repository";
+import type { TicketDiscoveryRepository } from "@/application/ports/ticket-discovery-repository";
 import type { AuthService } from "@/application/ports/auth-service";
+import type { TicketMaintenanceRepository } from "@/application/ports/ticket-maintenance-repository";
+import { InMemoryTicketMaintenanceRepository } from "@/infrastructure/repositories/in-memory-ticket-maintenance-repository";
+import { SqliteTicketMaintenanceRepository } from "@/infrastructure/repositories/sqlite-ticket-maintenance-repository";
+import { GetMaintenanceReceiptUseCase, ListMaintenanceTicketsUseCase, MaintainTicketUseCase } from "@/application/use-cases/maintain-ticket";
 
 import { InMemoryProjectRepository } from "@/infrastructure/repositories/in-memory-project-repository";
 import { InMemoryEpicRepository } from "@/infrastructure/repositories/in-memory-epic-repository";
@@ -17,6 +22,7 @@ import {
   SqliteTicketRepository,
 } from "@/infrastructure/repositories/sqlite-ticket-repository";
 import { SqliteTicketDependencyRepository } from "@/infrastructure/repositories/sqlite-ticket-dependency-repository";
+import { SqliteTicketDiscoveryRepository } from "@/infrastructure/repositories/sqlite-ticket-discovery-repository";
 import { openDatabase, type DatabaseType } from "@/infrastructure/sqlite/database";
 import { resolveDbPath, persistDbPath } from "@/infrastructure/sqlite/db-path";
 import { StubAuthService } from "@/infrastructure/auth/stub-auth-service";
@@ -42,6 +48,8 @@ import { RemoveTicketDependencyUseCase } from "@/application/use-cases/remove-ti
 import { ListTicketDependenciesUseCase } from "@/application/use-cases/list-ticket-dependencies";
 import { GetNextQueueTicketUseCase } from "@/application/use-cases/get-next-queue-ticket";
 import { ListMineQueueTicketsUseCase } from "@/application/use-cases/list-mine-queue-tickets";
+import { ListTicketAnnotationFacetsUseCase } from "@/application/use-cases/list-ticket-annotation-facets";
+import { SearchTicketsUseCase } from "@/application/use-cases/search-tickets";
 
 interface Container {
   projects: ProjectRepository;
@@ -49,6 +57,11 @@ interface Container {
   tickets: TicketRepository;
   ticketDependencies: TicketDependencyRepository;
   ticketQueue: TicketQueueRepository;
+  ticketDiscovery: TicketDiscoveryRepository;
+  ticketMaintenance: TicketMaintenanceRepository;
+  listMaintenanceTickets: ListMaintenanceTicketsUseCase;
+  maintainTicket: MaintainTicketUseCase;
+  getMaintenanceReceipt: GetMaintenanceReceiptUseCase;
   auth: AuthService;
   createProject: CreateProjectUseCase;
   createEpic: CreateEpicUseCase;
@@ -67,6 +80,8 @@ interface Container {
   listTicketDependencies: ListTicketDependenciesUseCase;
   getNextQueueTicket: GetNextQueueTicketUseCase;
   listMineQueueTickets: ListMineQueueTicketsUseCase;
+  listTicketAnnotationFacets: ListTicketAnnotationFacetsUseCase;
+  searchTickets: SearchTicketsUseCase;
   /** Mode currently in use ("memory" | "sqlite" | "supabase"). */
   repoMode: string;
   /** Absolute path of the SQLite file when repoMode === "sqlite", else null. */
@@ -91,6 +106,8 @@ function buildContainer(): Container {
   let tickets: TicketRepository;
   let ticketDependencies: TicketDependencyRepository;
   let ticketQueue: TicketQueueRepository;
+  let ticketDiscovery: TicketDiscoveryRepository;
+  let ticketMaintenance: TicketMaintenanceRepository;
   let db: DatabaseType | null = null;
   let dbPath: string | null = null;
 
@@ -102,6 +119,8 @@ function buildContainer(): Container {
     tickets = new SqliteTicketRepository(db);
     ticketDependencies = new SqliteTicketDependencyRepository(db);
     ticketQueue = new SqliteTicketQueueRepository(db);
+    ticketDiscovery = new SqliteTicketDiscoveryRepository(db);
+    ticketMaintenance = new SqliteTicketMaintenanceRepository(db);
   } else {
     if (repoMode !== "memory") {
       // eslint-disable-next-line no-console
@@ -111,9 +130,12 @@ function buildContainer(): Container {
     }
     projects = new InMemoryProjectRepository();
     epics = new InMemoryEpicRepository();
-    tickets = new InMemoryTicketRepository();
-    ticketDependencies = new InMemoryTicketDependencyRepository();
+    const memoryTickets = new InMemoryTicketRepository();
+    tickets = memoryTickets;
+    ticketDependencies = new InMemoryTicketDependencyRepository(memoryTickets.state);
+    ticketMaintenance = new InMemoryTicketMaintenanceRepository(memoryTickets.state);
     ticketQueue = new InMemoryTicketQueueRepository(tickets, ticketDependencies);
+    ticketDiscovery = memoryTickets;
   }
 
   // Never temporarily expose stub auth while the configured Supabase adapter loads.
@@ -141,6 +163,11 @@ function buildContainer(): Container {
     tickets,
     ticketDependencies,
     ticketQueue,
+    ticketDiscovery,
+    ticketMaintenance,
+    listMaintenanceTickets: new ListMaintenanceTicketsUseCase(ticketMaintenance),
+    maintainTicket: new MaintainTicketUseCase(ticketMaintenance),
+    getMaintenanceReceipt: new GetMaintenanceReceiptUseCase(ticketMaintenance),
     auth,
     createProject: new CreateProjectUseCase(projects),
     createEpic: new CreateEpicUseCase(projects, epics),
@@ -159,6 +186,8 @@ function buildContainer(): Container {
     listTicketDependencies: new ListTicketDependenciesUseCase(tickets, ticketDependencies),
     getNextQueueTicket: new GetNextQueueTicketUseCase(ticketQueue),
     listMineQueueTickets: new ListMineQueueTicketsUseCase(ticketQueue),
+    listTicketAnnotationFacets: new ListTicketAnnotationFacetsUseCase(ticketDiscovery),
+    searchTickets: new SearchTicketsUseCase(ticketDiscovery, ticketDependencies),
     repoMode,
     dbPath,
     _db: db,

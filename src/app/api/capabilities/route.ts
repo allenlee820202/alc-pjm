@@ -7,5 +7,7 @@ export async function GET() {
   if (!auth.ok) return auth.res;
   return NextResponse.json({
     ticketMetadata: {version: 1, tags: true, annotations: true, origin: true, immutableOrigin: true},
+    ticketDiscovery: {version: 1, annotationFacets: true, exactFilters: true, scopes: ["mine", "all"]},
+    workItemMaintenance: {version: 1, inventory: true, conditionalArchive: true, restore: true, receipts: true},
   });
 }

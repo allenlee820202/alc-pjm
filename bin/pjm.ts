@@ -1,396 +1,43 @@
 #!/usr/bin/env -S node --import tsx
-import { resolve } from "node:path";
 import { parseArgs } from "./_shared/args.js";
-import {
-  CONFIG_DIR,
-  ensureConfigDir,
-  readJsonFile,
-  writeJsonFile,
-} from "./_shared/fs-config.js";
+import { parseTicketDiscoveryArgs } from "./_shared/ticket-discovery.js";
+import { isMaintenanceCommand, parseTicketMaintenanceArgs, type MaintenanceArgs } from "./_shared/ticket-maintenance.js";
+import { CONFIG_PATH, DEFAULT_CONFIG, loadConfig } from "./_shared/cli-config.js";
+import { ensureConfigDir, writeJsonFile } from "./_shared/fs-config.js";
 import { createClient } from "./_shared/http.js";
 import { printResult, printError } from "./_shared/output.js";
-
-// ── Types ───────────────────────────────────────────────────────────
-
-interface CliConfig {
-  server: string;
-  auth: { email: string; password: string };
-}
-
-interface ProjectSnapshot {
-  id: string;
-  key: string;
-  name: string;
-  [k: string]: unknown;
-}
-
-interface TicketSnapshot {
-  id: string;
-  priority: string;
-  createdAt: string;
-  dependencyIds?: string[];
-  [k: string]: unknown;
-}
-
-// ── Config ──────────────────────────────────────────────────────────
-
-const CONFIG_PATH = resolve(CONFIG_DIR, "cli.json");
-
-const DEFAULT_CONFIG: CliConfig = {
-  server: "http://localhost:3000",
-  auth: { email: "admin@local", password: "changeme" },
-};
-
-function loadConfig(): CliConfig {
-  const existing = readJsonFile<CliConfig>(CONFIG_PATH);
-  if (existing) return existing;
-  // Auto-create with defaults
-  ensureConfigDir();
-  writeJsonFile(CONFIG_PATH, DEFAULT_CONFIG);
-  return DEFAULT_CONFIG;
-}
-
-// ── Project resolver ────────────────────────────────────────────────
-
-let projectCache: ProjectSnapshot[] | null = null;
-
-async function fetchProjects(
-  client: ReturnType<typeof createClient>,
-): Promise<ProjectSnapshot[]> {
-  if (projectCache) return projectCache;
-  const result = await client.request("GET", "/api/projects");
-  if (!result.ok) {
-    printError("Failed to fetch projects", result.data);
-  }
-  const data = result.data as { projects: ProjectSnapshot[] };
-  projectCache = data.projects;
-  return projectCache;
-}
-
-function isUuid(v: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-}
-
-async function resolveProjectId(
-  client: ReturnType<typeof createClient>,
-  keyOrId: string,
-): Promise<string> {
-  if (isUuid(keyOrId)) return keyOrId;
-  const projects = await fetchProjects(client);
-  const match = projects.find(
-    (p) => p.key.toLowerCase() === keyOrId.toLowerCase(),
-  );
-  if (!match) {
-    return printError(`Project not found by key: ${keyOrId}`);
-  }
-  return match.id;
-}
-
-// ── Priority rank for sorting ───────────────────────────────────────
-
-function priorityRank(p: string): number {
-  switch (p) {
-    case "p0":
-      return 0;
-    case "p1":
-      return 1;
-    case "p2":
-      return 2;
-    default:
-      return 9;
-  }
-}
-
-function sortTickets(tickets: TicketSnapshot[]): TicketSnapshot[] {
-  return [...tickets].sort((a, b) => {
-    const pr = priorityRank(a.priority) - priorityRank(b.priority);
-    if (pr !== 0) return pr;
-    return (a.createdAt || "").localeCompare(b.createdAt || "");
-  });
-}
-
-function parseLimit(flags: Flags): number | undefined {
-  const raw = flags["limit"];
-  if (raw === undefined) return undefined;
-  if (typeof raw !== "string") printError("--limit requires a positive integer");
-  const limit = Number(raw);
-  if (!Number.isInteger(limit) || limit <= 0) {
-    printError("--limit requires a positive integer");
-  }
-  return limit;
-}
-
-/** Only explicit flags are sent, keeping legacy empty-metadata calls unchanged. */
-function metadataBody(flags: Flags, create: boolean): Record<string, unknown> {
-  if (!create && flags["origin-json"] !== undefined) printError("--origin-json is create-only; origin is immutable");
-  const body: Record<string, unknown> = {};
-  for (const field of create ? ["tags", "annotations", "origin"] : ["tags", "annotations"]) {
-    const raw = flags[`${field}-json`];
-    if (raw === undefined) continue;
-    if (typeof raw !== "string") printError(`--${field}-json requires JSON`);
-    try {
-      body[field] = JSON.parse(raw);
-    } catch {
-      printError(`--${field}-json must contain valid JSON`);
-    }
-    const value = body[field];
-    if (field === "tags" && (!Array.isArray(value) || value.some((tag) => typeof tag !== "string"))) {
-      printError("--tags-json requires a JSON array of strings");
-    }
-    if ((field === "annotations" || field === "origin") &&
-        (value === null ? field !== "origin" : typeof value !== "object" || Array.isArray(value))) {
-      printError(`--${field}-json requires a JSON object${field === "origin" ? " or null" : ""}`);
-    }
-    if (field === "annotations" && Object.values(value as object).some((v) => typeof v !== "string")) {
-      printError("--annotations-json requires string values");
-    }
-  }
-  return body;
-}
-
-// ── Command handlers ────────────────────────────────────────────────
-
-type Client = ReturnType<typeof createClient>;
-type Flags = Record<string, string | boolean>;
-
-async function cmdCapabilities(client: Client): Promise<unknown> {
-  const result = await client.request("GET", "/api/capabilities");
-  if (!result.ok) printError("Failed to get capabilities", result.data);
-  return result.data;
-}
-
-async function cmdProjectList(client: Client): Promise<unknown> {
-  const result = await client.request("GET", "/api/projects");
-  if (!result.ok) printError("Failed to list projects", result.data);
-  return (result.data as { projects: unknown[] }).projects;
-}
-
-async function cmdProjectCreate(client: Client, flags: Flags): Promise<unknown> {
-  const key = flags["key"];
-  const name = flags["name"];
-  if (!key || typeof key !== "string") printError("--key is required");
-  if (!name || typeof name !== "string") printError("--name is required");
-  const result = await client.request("POST", "/api/projects", { key, name });
-  if (!result.ok) printError("Failed to create project", result.data);
-  return (result.data as { project: unknown }).project;
-}
-
-async function cmdEpicList(client: Client, flags: Flags): Promise<unknown> {
-  const project = flags["project"];
-  if (!project || typeof project !== "string") printError("--project is required");
-  const projectId = await resolveProjectId(client, project);
-  const result = await client.request("GET", `/api/epics?projectId=${projectId}`);
-  if (!result.ok) printError("Failed to list epics", result.data);
-  return (result.data as { epics: unknown[] }).epics;
-}
-
-async function cmdEpicCreate(client: Client, flags: Flags): Promise<unknown> {
-  const project = flags["project"];
-  const name = flags["name"];
-  if (!project || typeof project !== "string") printError("--project is required");
-  if (!name || typeof name !== "string") printError("--name is required");
-  const projectId = await resolveProjectId(client, project);
-  const body: Record<string, unknown> = { projectId, name };
-  if (typeof flags["description"] === "string") body.description = flags["description"];
-  const result = await client.request("POST", "/api/epics", body);
-  if (!result.ok) printError("Failed to create epic", result.data);
-  return (result.data as { epic: unknown }).epic;
-}
-
-async function cmdTicketList(client: Client, flags: Flags): Promise<unknown> {
-  const params = new URLSearchParams();
-  if (typeof flags["project"] === "string") {
-    const projectId = await resolveProjectId(client, flags["project"]);
-    params.set("projectId", projectId);
-  }
-  if (typeof flags["epic"] === "string") params.set("epicId", flags["epic"]);
-  if (typeof flags["status"] === "string") params.set("status", flags["status"]);
-  if (typeof flags["priority"] === "string") params.set("priority", flags["priority"]);
-  if (typeof flags["type"] === "string") params.set("type", flags["type"]);
-  for (const [flag, param] of [["tag", "tag"], ["annotation-key", "annotationKey"],
-    ["annotation-value", "annotationValue"], ["automation-id", "automationId"]]) {
-    const value = flags[flag];
-    if (value !== undefined) {
-      if (typeof value !== "string") printError(`--${flag} requires a value`);
-      params.set(param, value);
-    }
-  }
-  if (params.has("annotationKey") !== params.has("annotationValue")) {
-    printError("--annotation-key and --annotation-value must be supplied together");
-  }
-  const qs = params.toString();
-  const result = await client.request("GET", `/api/tickets${qs ? "?" + qs : ""}`);
-  if (!result.ok) printError("Failed to list tickets", result.data);
-  return (result.data as { tickets: unknown[] }).tickets;
-}
-
-async function cmdTicketCreate(client: Client, flags: Flags): Promise<unknown> {
-  const project = flags["project"];
-  const type = flags["type"];
-  const title = flags["title"];
-  const priority = flags["priority"];
-  if (!project || typeof project !== "string") printError("--project is required");
-  if (!type || typeof type !== "string") printError("--type is required");
-  if (!title || typeof title !== "string") printError("--title is required");
-  if (!priority || typeof priority !== "string") printError("--priority is required");
-  const metadata = metadataBody(flags, true);
-  const projectId = await resolveProjectId(client, project);
-  const body: Record<string, unknown> = { projectId, type, title, priority, ...metadata };
-  if (typeof flags["epic"] === "string") body.epicId = flags["epic"];
-  if (typeof flags["description"] === "string") body.description = flags["description"];
-  const result = await client.request("POST", "/api/tickets", body);
-  if (!result.ok) printError("Failed to create ticket", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketGet(client: Client, id: string): Promise<unknown> {
-  const result = await client.request("GET", `/api/tickets/${id}`);
-  if (!result.ok) printError("Ticket not found", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketUpdate(
-  client: Client,
-  id: string,
-  flags: Flags,
-): Promise<unknown> {
-  const body: Record<string, unknown> = metadataBody(flags, false);
-  if (typeof flags["title"] === "string") body.title = flags["title"];
-  if (typeof flags["status"] === "string") body.status = flags["status"];
-  if (typeof flags["priority"] === "string") body.priority = flags["priority"];
-  if (typeof flags["epic"] === "string") body.epicId = flags["epic"];
-  if (typeof flags["description"] === "string") body.description = flags["description"];
-  const result = await client.request("PATCH", `/api/tickets/${id}`, body);
-  if (!result.ok) printError("Failed to update ticket", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketTransition(
-  client: Client,
-  id: string,
-  flags: Flags,
-): Promise<unknown> {
-  const status = flags["status"];
-  if (!status || typeof status !== "string") printError("--status is required");
-  const result = await client.request("PATCH", `/api/tickets/${id}`, { status });
-  if (!result.ok) printError("Failed to transition ticket", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketTake(client: Client, id: string): Promise<unknown> {
-  const result = await client.request("POST", `/api/tickets/${id}/take`);
-  if (!result.ok) printError("Failed to take ticket", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketRelease(client: Client, id: string): Promise<unknown> {
-  const result = await client.request("POST", `/api/tickets/${id}/release`);
-  if (!result.ok) printError("Failed to release ticket", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketDone(client: Client, id: string): Promise<unknown> {
-  const result = await client.request("PATCH", `/api/tickets/${id}`, {
-    status: "done",
-  });
-  if (!result.ok) printError("Failed to mark ticket done", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketArchive(client: Client, id: string): Promise<unknown> {
-  const result = await client.request("PATCH", `/api/tickets/${id}`, {
-    archived: true,
-  });
-  if (!result.ok) printError("Failed to archive ticket", result.data);
-  return (result.data as { ticket: unknown }).ticket;
-}
-
-async function cmdTicketNext(client: Client): Promise<unknown> {
-  const queueRes = await client.request("GET", "/api/tickets/queue?mode=next");
-  if (queueRes.ok) return (queueRes.data as { ticket: TicketSnapshot | null }).ticket;
-  if (queueRes.status !== 404) printError("Failed to get next ticket", queueRes.data);
-
-  const [todoRes, doneRes] = await Promise.all([
-    client.request("GET", "/api/tickets?status=todo"),
-    client.request("GET", "/api/tickets?status=done"),
-  ]);
-  if (!todoRes.ok) printError("Failed to list tickets", todoRes.data);
-  if (!doneRes.ok) printError("Failed to list done tickets", doneRes.data);
-  const todos = (todoRes.data as { tickets: TicketSnapshot[] }).tickets;
-  const doneTickets = (doneRes.data as { tickets: TicketSnapshot[] }).tickets;
-  const doneIds = new Set(doneTickets.map((t) => t.id));
-  const eligible = todos.filter((t) => {
-    const deps = t.dependencyIds ?? [];
-    return deps.every((depId) => doneIds.has(depId));
-  });
-  const sorted = sortTickets(eligible);
-  return sorted.length > 0 ? sorted[0] : null;
-}
-
-async function cmdTicketMine(client: Client, flags: Flags): Promise<unknown> {
-  const limit = parseLimit(flags);
-  const params = new URLSearchParams({ mode: "mine" });
-  if (limit !== undefined) params.set("limit", String(limit));
-  const queueRes = await client.request(
-    "GET",
-    `/api/tickets/queue?${params.toString()}`,
-  );
-  if (queueRes.ok) return (queueRes.data as { tickets: TicketSnapshot[] }).tickets;
-  if (queueRes.status !== 404) printError("Failed to list mine tickets", queueRes.data);
-
-  const [todoRes, inProgressRes] = await Promise.all([
-    client.request("GET", "/api/tickets?status=todo"),
-    client.request("GET", "/api/tickets?status=in_progress"),
-  ]);
-  if (!todoRes.ok) printError("Failed to list todo tickets", todoRes.data);
-  if (!inProgressRes.ok)
-    printError("Failed to list in_progress tickets", inProgressRes.data);
-  const todos = (todoRes.data as { tickets: TicketSnapshot[] }).tickets;
-  const inProgress = (inProgressRes.data as { tickets: TicketSnapshot[] }).tickets;
-  const sorted = sortTickets([...todos, ...inProgress]);
-  return limit !== undefined ? sorted.slice(0, limit) : sorted;
-}
-
-// ── Dependency commands ─────────────────────────────────────────────
-
-async function cmdTicketDepList(client: Client, ticketId: string): Promise<unknown> {
-  const result = await client.request("GET", `/api/tickets/${ticketId}/dependencies`);
-  if (!result.ok) printError("Failed to list dependencies", result.data);
-  return (result.data as { dependencies: unknown[] }).dependencies;
-}
-
-async function cmdTicketDepAdd(
-  client: Client,
-  ticketId: string,
-  flags: Flags,
-): Promise<unknown> {
-  const on = flags["on"];
-  if (!on || typeof on !== "string") printError("--on <dependsOnTicketId> is required");
-  const result = await client.request("POST", `/api/tickets/${ticketId}/dependencies`, {
-    dependsOnTicketId: on,
-  });
-  if (!result.ok) printError("Failed to add dependency", result.data);
-  return (result.data as { dependency: unknown }).dependency;
-}
-
-async function cmdTicketDepRemove(
-  client: Client,
-  ticketId: string,
-  flags: Flags,
-): Promise<unknown> {
-  const on = flags["on"];
-  if (!on || typeof on !== "string") printError("--on <dependsOnTicketId> is required");
-  const result = await client.request("DELETE", `/api/tickets/${ticketId}/dependencies`, {
-    dependsOnTicketId: on,
-  });
-  if (!result.ok) printError("Failed to remove dependency", result.data);
-  return (result.data as { ok: boolean });
-}
+import { cmdCapabilities } from "./commands/capabilities.js";
+import { cmdProjectList, cmdProjectCreate } from "./commands/project.js";
+import { cmdEpicList, cmdEpicCreate } from "./commands/epic.js";
+import {
+  cmdTicketList,
+  cmdTicketCreate,
+  cmdTicketGet,
+  cmdTicketUpdate,
+  cmdTicketTransition,
+  cmdTicketTake,
+  cmdTicketRelease,
+  cmdTicketDone,
+  cmdTicketArchive,
+  cmdTicketNext,
+  cmdTicketMine,
+} from "./commands/ticket.js";
+import { cmdTicketDepList, cmdTicketDepAdd, cmdTicketDepRemove } from "./commands/ticket-dependencies.js";
+import { cmdTicketDiscovery } from "./commands/ticket-discovery.js";
+import { cmdTicketMaintenance } from "./commands/ticket-maintenance.js";
 
 // ── Main dispatcher ─────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { positionals, flags } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  let { positionals, flags } = parseArgs(argv);
+  let maintenance: MaintenanceArgs | undefined;
+  if (positionals[0] === "ticket" && isMaintenanceCommand(positionals[1])) {
+    maintenance = parseTicketMaintenanceArgs(argv, positionals[1]);
+    ({positionals, flags} = maintenance);
+  } else if (positionals[0] === "ticket" && (positionals[1] === "annotation-facets" || positionals[1] === "search")) {
+    ({positionals, flags} = parseTicketDiscoveryArgs(argv, positionals[1]));
+  }
 
   // Output options (parsed globally)
   const outputOpts = {
@@ -451,8 +98,19 @@ async function main(): Promise<void> {
 
     case "ticket": {
       switch (action) {
+        case "maintenance-list":
+        case "maintenance-archive":
+        case "maintenance-restore":
+        case "maintenance-receipt":
+          if (!maintenance) printError("Invalid maintenance command");
+          result = await cmdTicketMaintenance(client, maintenance);
+          break;
         case "list":
           result = await cmdTicketList(client, flags);
+          break;
+        case "annotation-facets":
+        case "search":
+          result = await cmdTicketDiscovery(client, flags, action);
           break;
         case "create":
           result = await cmdTicketCreate(client, flags);
@@ -528,7 +186,7 @@ async function main(): Promise<void> {
         }
         default:
           printError(
-            "Usage: pjm ticket <list|create|get|update|transition|take|release|done|archive|next|mine|dep>",
+            "Usage: pjm ticket <list|annotation-facets|search|maintenance-list|maintenance-archive|maintenance-restore|maintenance-receipt|create|get|update|transition|take|release|done|archive|next|mine|dep>",
           );
       }
       break;

@@ -17,6 +17,6 @@ it("returns the exact version-1 ticket metadata negotiation contract", async () 
   fake.currentUser.mockResolvedValue({id: "fake-user"});
   const response = await GET();
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ticketMetadata: {version: 1, tags: true, annotations: true, origin: true, immutableOrigin: true}});
+  expect(await response.json()).toEqual({ticketMetadata: {version: 1, tags: true, annotations: true, origin: true, immutableOrigin: true}, ticketDiscovery: {version: 1, annotationFacets: true, exactFilters: true, scopes: ["mine", "all"]}, workItemMaintenance: {version: 1, inventory: true, conditionalArchive: true, restore: true, receipts: true}});
   expect(fake.currentUser).toHaveBeenCalledOnce();
 });
