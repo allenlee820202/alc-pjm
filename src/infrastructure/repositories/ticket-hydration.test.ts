@@ -8,7 +8,7 @@ import { PersistenceError } from "./persistence-error";
 import { Project } from "@/domain/project/project";
 import { Id } from "@/domain/shared/id";
 import { GET } from "@/app/api/tickets/[ticketId]/route";
-import { InMemoryTicketDependencyRepository } from "./in-memory-ticket-dependency-repository";
+import { SqliteTicketDependencyRepository } from "./sqlite-ticket-dependency-repository";
 
 const fake = vi.hoisted(() => ({container: {} as Record<string, unknown>}));
 vi.mock("@/infrastructure/container", () => ({getContainer: () => fake.container}));
@@ -31,7 +31,7 @@ it.each([
     await expect(read()).rejects.toBeInstanceOf(PersistenceError);
     await expect(read()).rejects.toThrow(id.value);
   }
-  fake.container = {tickets: repo, ticketDependencies: new InMemoryTicketDependencyRepository(), auth: {getCurrentUser: async () => ({id: "fake-user"})}};
+  fake.container = {tickets: repo, ticketDependencies: new SqliteTicketDependencyRepository(db), auth: {getCurrentUser: async () => ({id: "fake-user"})}};
   vi.spyOn(console, "error").mockImplementation(() => {});
   const response = await GET(new NextRequest("http://localhost/api/tickets/" + id.value), {params: Promise.resolve({ticketId: id.value})});
   expect(response.status).toBe(500);

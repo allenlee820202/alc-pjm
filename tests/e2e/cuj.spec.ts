@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 const EMAIL = "demo@example.com";
 const PASSWORD = "demo1234";
@@ -30,7 +30,14 @@ test.describe("Auth gate", () => {
   test("logs in and lands on a project page", async ({ page }) => {
     await login(page);
     await expect(page).toHaveURL(/\/projects\//);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(/DEMO/);
+    // Parallel tests may create a project sorting before DEMO. Verify the actual authenticated destination.
+    const projectId = new URL(page.url()).pathname.split("/")[2];
+    const response = await page.context().request.get("/api/projects");
+    expect(response.status()).toBe(200);
+    const {projects} = await response.json();
+    const project = projects.find((candidate: {id: string}) => candidate.id === projectId);
+    expect(project).toBeDefined();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`${project.key} · ${project.name}`);
   });
 });
 

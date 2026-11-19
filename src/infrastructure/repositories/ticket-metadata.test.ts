@@ -26,7 +26,7 @@ for (const mode of ["memory", "sqlite"] as const) describe(mode + " metadata per
     }
     const tickets = mode === "sqlite" ? new SqliteTicketRepository(db!) : new InMemoryTicketRepository();
     const queue = mode === "sqlite" ? new SqliteTicketQueueRepository(db!) :
-      new InMemoryTicketQueueRepository(tickets, new InMemoryTicketDependencyRepository());
+      new InMemoryTicketQueueRepository(tickets, new InMemoryTicketDependencyRepository((tickets as InMemoryTicketRepository).state));
     const ticket = Ticket.create({ projectId: project.id, type: TicketType.of("bug"), title: "Metadata",
       priority: Priority.of("p0"), tags: ["triage", "Tag"], annotations: { 'a.b["c"]': "literal", "' OR 1=1 --": "", toString: "literal" }, origin });
     const plain = Ticket.create({ projectId: project.id, type: TicketType.of("task"), title: "Plain", priority: Priority.of("p2") });

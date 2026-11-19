@@ -1,6 +1,7 @@
 import type { DatabaseType } from "@/infrastructure/sqlite/database";
 import type { TicketDependencyRepository } from "@/application/ports/ticket-dependency-repository";
 import { TicketDependency } from "@/domain/ticket/ticket-dependency";
+import { ConflictError } from "@/domain/shared/errors";
 
 interface DepRow {
   ticket_id: string;
@@ -13,16 +14,21 @@ export class SqliteTicketDependencyRepository implements TicketDependencyReposit
 
   async save(dep: TicketDependency): Promise<void> {
     const s = dep.toSnapshot();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO ticket_dependencies (ticket_id, depends_on_ticket_id, created_at)
-         VALUES (@ticket_id, @depends_on_ticket_id, @created_at)`,
-      )
-      .run({
-        ticket_id: s.ticketId,
-        depends_on_ticket_id: s.dependsOnTicketId,
-        created_at: s.createdAt,
-      });
+    this.db.transaction(() => {
+      if (this.db.prepare<[string, string], {id: string}>("SELECT id FROM tickets WHERE id IN (?, ?) AND archived != 0 LIMIT 1").get(s.ticketId, s.dependsOnTicketId)) {
+        throw new ConflictError("Cannot link an archived ticket");
+      }
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO ticket_dependencies (ticket_id, depends_on_ticket_id, created_at)
+           VALUES (@ticket_id, @depends_on_ticket_id, @created_at)`,
+        )
+        .run({
+          ticket_id: s.ticketId,
+          depends_on_ticket_id: s.dependsOnTicketId,
+          created_at: s.createdAt,
+        });
+    }).immediate();
   }
 
   async delete(ticketId: string, dependsOnTicketId: string): Promise<void> {

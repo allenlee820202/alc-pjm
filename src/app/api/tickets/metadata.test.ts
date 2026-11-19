@@ -30,7 +30,7 @@ const data = () => ({projectId, title: "Meta", type: "task", priority: "p0"});
 
 beforeEach(async () => {
   const projects = new InMemoryProjectRepository(), epics = new InMemoryEpicRepository(), tickets = new InMemoryTicketRepository();
-  const dependencies = new InMemoryTicketDependencyRepository(), ticketQueue = new InMemoryTicketQueueRepository(tickets, dependencies);
+  const dependencies = new InMemoryTicketDependencyRepository(tickets.state), ticketQueue = new InMemoryTicketQueueRepository(tickets, dependencies);
   const project = Project.create({key: "META", name: "Metadata"}); await projects.save(project); projectId = project.id.value;
   fake.authenticated = true;
   fake.container = {tickets, ticketDependencies: dependencies, auth: {getCurrentUser: async () => fake.authenticated ? {id: "creator"} : null},

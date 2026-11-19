@@ -1,21 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { InMemoryProjectRepository } from "@/infrastructure/repositories/in-memory-project-repository";
-import { InMemoryEpicRepository } from "@/infrastructure/repositories/in-memory-epic-repository";
-import { InMemoryTicketRepository } from "@/infrastructure/repositories/in-memory-ticket-repository";
 import { Project } from "@/domain/project/project";
-import { CreateTicketUseCase } from "./create-ticket";
-import { UpdateTicketUseCase, type UpdateTicketInput } from "./update-ticket";
-import { ListTicketsUseCase } from "./list-tickets";
+import type { UpdateTicketInput } from "./update-ticket";
+import { createUseCaseFixtures } from "./use-case-test-fixtures";
 import type { AutomationOrigin } from "@/domain/ticket/ticket-metadata";
 
 const origin: AutomationOrigin = {system: "alc-agent", automationId: "daily", automationRevision: "revision-1", runId: "r1", approvalId: "a1"};
 async function setup() {
-  const projects = new InMemoryProjectRepository();
-  const epics = new InMemoryEpicRepository();
-  const tickets = new InMemoryTicketRepository();
+  const { projects, tickets, createTicket: create, updateTicket: update, listTickets: list } = createUseCaseFixtures();
   const project = Project.create({key: "META", name: "Metadata"}); await projects.save(project);
-  return { tickets, project, create: new CreateTicketUseCase(projects, epics, tickets),
-    update: new UpdateTicketUseCase(tickets, epics), list: new ListTicketsUseCase(tickets) };
+  return { tickets, project, create, update, list };
 }
 
 describe("metadata use cases", () => {

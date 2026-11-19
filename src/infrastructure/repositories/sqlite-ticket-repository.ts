@@ -10,7 +10,7 @@ import { ConflictError, ValidationError } from "@/domain/shared/errors";
 import { PersistenceError } from "./persistence-error";
 import { validateTicketMetadataFilters } from "@/domain/ticket/ticket-metadata";
 
-interface TicketRow {
+export interface TicketRow {
   id: string;
   project_id: string;
   epic_id: string | null;
@@ -36,13 +36,17 @@ export class SqliteTicketRepository implements TicketRepository {
   async save(ticket: Ticket): Promise<void> {
     const s = ticket.toSnapshot();
     const version = this.db.transaction(() => {
-      const existing = this.db.prepare<[string], { origin: string | null; row_version: number }>(
-        "SELECT origin, row_version FROM tickets WHERE id = ?",
+      const existing = this.db.prepare<[string], { origin: string | null; row_version: number; parent_ticket_id: string | null }>(
+        "SELECT origin, row_version, parent_ticket_id FROM tickets WHERE id = ?",
       ).get(s.id);
       const origin = s.origin === null ? null : JSON.stringify(s.origin);
       if (existing && existing.origin !== origin) throw new ValidationError("Origin is immutable");
       if ((existing ? existing.row_version : null) !== ticket.persistenceVersion) {
         throw new ConflictError("Ticket changed; reload before retrying");
+      }
+      if (s.parentTicketId && existing?.parent_ticket_id !== s.parentTicketId) {
+        const parent = this.db.prepare<[string], {archived: number}>("SELECT archived FROM tickets WHERE id = ?").get(s.parentTicketId);
+        if (s.archived || parent?.archived) throw new ConflictError("Cannot link an archived ticket as parent or child");
       }
       const nextVersion = (existing?.row_version ?? 0) + 1;
       this.db
@@ -201,7 +205,7 @@ export class SqliteTicketQueueRepository implements TicketQueueRepository {
   }
 }
 
-function hydrate(row: TicketRow): Ticket {
+export function hydrate(row: TicketRow): Ticket {
   try {
     if (!Number.isSafeInteger(row.row_version) || row.row_version < 0) {
       throw new Error("Invalid persisted ticket version");
@@ -212,7 +216,7 @@ function hydrate(row: TicketRow): Ticket {
   }
 }
 
-function toSnapshot(row: TicketRow): TicketSnapshot {
+export function toSnapshot(row: TicketRow): TicketSnapshot {
   return {
     id: row.id,
     projectId: row.project_id,

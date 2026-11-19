@@ -83,6 +83,46 @@ const MIGRATIONS = [{
         UPDATE tickets SET row_version = OLD.row_version + 1 WHERE id = NEW.id;
       END;
   `,
+}, {
+  version: 3,
+  sql: `
+    CREATE TABLE ticket_maintenance_receipts (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL UNIQUE,
+      entity_id TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('archive', 'restore')),
+      fingerprint TEXT NOT NULL,
+      automation_ids TEXT NOT NULL,
+      restore_receipt_id TEXT,
+      receipt TEXT NOT NULL,
+      applied_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_ticket_maintenance_entity ON ticket_maintenance_receipts(entity_id, applied_at);
+    CREATE INDEX idx_tickets_maintenance ON tickets(archived, created_at, id);
+    CREATE TRIGGER ticket_maintenance_receipts_no_update BEFORE UPDATE ON ticket_maintenance_receipts
+      BEGIN SELECT RAISE(ABORT, 'Maintenance receipts are append-only'); END;
+    CREATE TRIGGER ticket_maintenance_receipts_no_delete BEFORE DELETE ON ticket_maintenance_receipts
+      BEGIN SELECT RAISE(ABORT, 'Maintenance receipts are append-only'); END;
+
+    -- Guard graph creation at the persistence boundary, not on detached use-case reads.
+    -- SQLite serializes these statements with maintenance's BEGIN IMMEDIATE transaction.
+    CREATE TRIGGER ticket_dependencies_active_insert BEFORE INSERT ON ticket_dependencies
+      WHEN EXISTS (SELECT 1 FROM tickets WHERE id IN (NEW.ticket_id, NEW.depends_on_ticket_id) AND archived != 0)
+      BEGIN SELECT RAISE(ABORT, 'Cannot link an archived ticket'); END;
+    CREATE TRIGGER ticket_dependencies_active_update BEFORE UPDATE OF ticket_id, depends_on_ticket_id ON ticket_dependencies
+      WHEN EXISTS (SELECT 1 FROM tickets WHERE id IN (NEW.ticket_id, NEW.depends_on_ticket_id) AND archived != 0)
+      BEGIN SELECT RAISE(ABORT, 'Cannot link an archived ticket'); END;
+    CREATE TRIGGER tickets_active_parent_insert BEFORE INSERT ON tickets
+      WHEN NEW.parent_ticket_id IS NOT NULL
+        -- UPSERT of an unchanged legacy edge is not insertion of a new relation.
+        AND NOT EXISTS (SELECT 1 FROM tickets WHERE id = NEW.id AND parent_ticket_id = NEW.parent_ticket_id)
+        AND (NEW.archived != 0 OR EXISTS (SELECT 1 FROM tickets WHERE id = NEW.parent_ticket_id AND archived != 0))
+      BEGIN SELECT RAISE(ABORT, 'Cannot link an archived ticket as parent or child'); END;
+    CREATE TRIGGER tickets_active_parent_update BEFORE UPDATE OF parent_ticket_id ON tickets
+      WHEN NEW.parent_ticket_id IS NOT NULL AND NEW.parent_ticket_id IS NOT OLD.parent_ticket_id
+        AND (NEW.archived != 0 OR EXISTS (SELECT 1 FROM tickets WHERE id = NEW.parent_ticket_id AND archived != 0))
+      BEGIN SELECT RAISE(ABORT, 'Cannot link an archived ticket as parent or child'); END;
+  `,
 }];
 
 /** Exported for isolated migration tests; callers normally use openDatabase. */
